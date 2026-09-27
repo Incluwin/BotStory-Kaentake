@@ -18,6 +18,13 @@
 #include <strsafe.h>
 #include <intrin.h>
 
+// Implemented in client_prefs.cpp — apply KAENTAKE_* env-var overrides to
+// GLOBAL_OPT after LoadGlobal, and mirror current in-game values back to
+// config.ini after SaveGlobal. Must be called AFTER the original hooks
+// run so we see/write the post-load / post-save state.
+extern void ApplyPrefsAfterLoadGlobal();
+extern void MirrorPrefsToConfigAfterSaveGlobal();
+
 #define SCREEN_WIDTH_MAX     1920
 #define SCREEN_HEIGHT_MAX    1080
 #define SCREEN_MESSAGE_WIDTH 400
@@ -150,11 +157,49 @@ void CConfig::LoadCharacter_hook(int nWorldID, unsigned int dwCharacterId) {
 void CConfig::LoadGlobal_hook() {
     CConfig::LoadGlobal(this);
     g_nResolution = GetOpt_Int(GLOBAL_OPT, "soScreenResolution", 0, 0, 4);
+
+    // If the launcher set KAENTAKE_RESOLUTION from config.ini's [config]
+    // resolution= line, it overrides the saved in-game preference for this
+    // session. Treat config.ini as the source of truth: the user can still
+    // pick a different res in-game (and SaveGlobal will persist it), but
+    // the next launch will again honor whatever config.ini says.
+    char sEnv[8];
+    DWORD n = GetEnvironmentVariableA("KAENTAKE_RESOLUTION", sEnv, sizeof(sEnv));
+    if (n > 0 && n < sizeof(sEnv) && sEnv[0] >= '0' && sEnv[0] <= '4') {
+        g_nResolution = sEnv[0] - '0';
+    }
+
+    // Other config-driven sysopt keys (BGM/SFX volume+mute, window mode,
+    // HP/MP alert). Each individual override is a no-op if the env var is
+    // absent, so this is safe even when nothing was propagated.
+    ApplyPrefsAfterLoadGlobal();
 }
 
 void CConfig::SaveGlobal_hook() {
     CConfig::SaveGlobal(this);
     SetOpt_Int(GLOBAL_OPT, "soScreenResolution", g_nResolution);
+
+    // If config.ini already has a [config] resolution= line (user opted
+    // into config-driven resolution), mirror the current in-game choice
+    // back to it so it stays in sync. If the line is absent, we leave
+    // config.ini alone -- that signals the user wants in-game control
+    // exclusively and we shouldn't inject the line uninvited.
+    char buf[32];
+    DWORD n = GetPrivateProfileStringA(
+        "config", "resolution", "",
+        buf, sizeof(buf), ".\\" CONSTANTS_CONFIG_NAME);
+    if (n > 0 && g_nResolution >= 0 && g_nResolution <= 4) {
+        static const char* const kWxH[] = {
+            "800x600", "1024x768", "1366x768", "1600x900", "1920x1080"
+        };
+        WritePrivateProfileStringA(
+            "config", "resolution", kWxH[g_nResolution],
+            ".\\" CONSTANTS_CONFIG_NAME);
+    }
+
+    // Same mirroring, scaled to the rest of the sysopt keys. Only keys
+    // already present in config.ini get updated -- opt-in stays per key.
+    MirrorPrefsToConfigAfterSaveGlobal();
 }
 
 void CConfig::ApplySysOpt_hook(void* pSysOpt, int bApplyVideo) {
@@ -670,6 +715,12 @@ void set_screen_resolution(int nResolution, bool bSave) {
             // CMapLoadable::ReloadBack
             reinterpret_cast<void(__thiscall*)(CMapLoadable*)>(0x00644491)(field);
         }
+        // Re-pick the quickSlot bar variant for the new width. Note the
+        // StatusBar may still hold a cached canvas pointer from launch
+        // time -- we swap the property tree, but whether the change is
+        // visible without relaunch depends on whether CUIStatusBar re-reads
+        // the canvas or cached it. The diag log will record the swap.
+        ApplyQuickslotOverride("reapply");
     }
     if (bSave) {
         g_nResolution = nResolution;

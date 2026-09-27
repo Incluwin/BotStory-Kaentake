@@ -1,10 +1,87 @@
 #include "debug.h"
 #include "constants.h"
+#include "patcher.h"
 #include <windows.h>
 #include <detours.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+
+// Read the optional [config] resolution= key from config.ini and, if present
+// and valid, propagate it to the injected DLL via KAENTAKE_RESOLUTION (which
+// MapleStory.exe inherits through CreateProcess's default environment).
+// Accepted values:
+//   0..4           -- direct index matching CConfig::soScreenResolution
+//   800x600        -- index 0
+//   1024x768       -- index 1
+//   1366x768       -- index 2
+//   1600x900       -- index 3
+//   1920x1080      -- index 4
+// Unset / invalid values are silently ignored; resolution.cpp then falls
+// back to the user's saved in-game preference (GLOBAL_OPT/soScreenResolution).
+static void PropagateResolutionFromConfig() {
+    char buf[32];
+    DWORD n = GetPrivateProfileStringA(
+        "config", "resolution", "",
+        buf, sizeof(buf), ".\\" CONSTANTS_CONFIG_NAME);
+    if (n == 0) return;
+
+    int resIdx = -1;
+    if      (strcmp(buf, "800x600")   == 0) resIdx = 0;
+    else if (strcmp(buf, "1024x768")  == 0) resIdx = 1;
+    else if (strcmp(buf, "1366x768")  == 0) resIdx = 2;
+    else if (strcmp(buf, "1600x900")  == 0) resIdx = 3;
+    else if (strcmp(buf, "1920x1080") == 0) resIdx = 4;
+    else if (n == 1 && buf[0] >= '0' && buf[0] <= '4') resIdx = buf[0] - '0';
+
+    if (resIdx >= 0 && resIdx <= 4) {
+        char sVal[2] = { static_cast<char>('0' + resIdx), '\0' };
+        SetEnvironmentVariableA("KAENTAKE_RESOLUTION", sVal);
+    }
+}
+
+
+// Propagate the integer-valued [config] sysopt keys (bgm_volume, etc.) that
+// client_prefs.cpp knows how to override. Mirror of the table in
+// client_prefs.cpp — keep in sync. Invalid or absent values are silently
+// skipped; the DLL's ApplyPrefsAfterLoadGlobal only touches opt keys when
+// the env var actually parsed.
+static void PropagateIntFromConfig(const char* sKey, const char* sEnvName,
+                                   int nLow, int nHigh) {
+    char buf[16];
+    DWORD n = GetPrivateProfileStringA(
+        "config", sKey, "", buf, sizeof(buf), ".\\" CONSTANTS_CONFIG_NAME);
+    if (n == 0) return;
+    char* endp = nullptr;
+    long val = strtol(buf, &endp, 10);
+    if (endp == buf) return;
+    if (val < nLow) val = nLow;
+    if (val > nHigh) val = nHigh;
+    char sVal[16];
+    sprintf_s(sVal, sizeof(sVal), "%ld", val);
+    SetEnvironmentVariableA(sEnvName, sVal);
+}
+
+static void PropagateSysOptsFromConfig() {
+    PropagateIntFromConfig("bgm_volume", "KAENTAKE_BGM_VOLUME", 0, 100);
+    PropagateIntFromConfig("bgm_mute",   "KAENTAKE_BGM_MUTE",   0,   1);
+    PropagateIntFromConfig("sfx_volume", "KAENTAKE_SFX_VOLUME", 0, 100);
+    PropagateIntFromConfig("sfx_mute",   "KAENTAKE_SFX_MUTE",   0,   1);
+    PropagateIntFromConfig("fullscreen", "KAENTAKE_FULLSCREEN", 0,   1);
+    PropagateIntFromConfig("hp_alert",   "KAENTAKE_HP_ALERT",   0, 100);
+    PropagateIntFromConfig("mp_alert",   "KAENTAKE_MP_ALERT",   0, 100);
+}
 
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+    if (!PatcherRun()) {
+        return 1;
+    }
+
+    PropagateResolutionFromConfig();
+    PropagateSysOptsFromConfig();
+
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof(si));

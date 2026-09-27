@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "hook.h"
 #include "constants.h"
+#include "v83_version_guard.h"
 #include "ztl/ztl.h"
 #include <windows.h>
 
@@ -46,6 +47,10 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD fdwReason, LPVOID lpvReserved) {
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
+        // Bail before any hooks go in if the host binary isn't the v83 client
+        // our offsets were written for. No-op until the expected fingerprint
+        // is populated in v83_offsets.h.
+        v83::EnsureClientVersionOrExit();
         ProcessCommandLine();
         ProcessConfigFile();
         AttachSystemHooks();

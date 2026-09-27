@@ -53,8 +53,20 @@ void AttachItemEffectMod();
 void AttachResolutionMod();
 void AttachMobHpTagMod();
 void AttachToolTipMod();
+void AttachFusionAnvilMod();
 void AttachIconIconMod();
 void AttachTempStatMod();
+void AttachQuickLoginMod();
+void AttachRememberPasswordMod();
+void AttachFreeAddy();
+void AttachBossHPMod();
+void AttachChronicleExtras();
+void AttachEnlargeQuickslotMod();
+void AttachShoulderSlotsFix();
+void AttachIsCorrectBodyPartFix();
+void AttachGetBodyPartFromItemFix();
+void AttachExtChainLightning();
+void AttachMapInfoToolTip();
 
 inline void AttachClientHooks() {
     AttachClientBypass();
@@ -66,8 +78,20 @@ inline void AttachClientHooks() {
     AttachResolutionMod();
     AttachMobHpTagMod();
     AttachToolTipMod();
+    AttachFusionAnvilMod();
     AttachIconIconMod();
     AttachTempStatMod();
+    AttachQuickLoginMod();
+    AttachRememberPasswordMod();
+    // AttachBossHPMod();  // disabled: duplicates the % shown by AttachMobHpTagMod under the boss icon
+    AttachChronicleExtras();
+    AttachEnlargeQuickslotMod();
+    AttachShoulderSlotsFix();
+    AttachIsCorrectBodyPartFix();
+    AttachGetBodyPartFromItemFix();
+    AttachFreeAddy();
+    AttachExtChainLightning();
+    AttachMapInfoToolTip();
 }
 
 

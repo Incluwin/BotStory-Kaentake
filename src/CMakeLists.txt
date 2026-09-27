@@ -8,20 +8,40 @@ add_library(injector SHARED
     avatar.cpp
     itemeff.cpp
     resolution.cpp
+    client_prefs.cpp
     mobhptag.cpp
     tooltip.cpp
+    fusionanvil.cpp
     itemicon.cpp
     tempstat.cpp
     stringpool.cpp
     debug.cpp
     hook.cpp
+    quicklogin.cpp
+    rememberpw.cpp
+    cosmicSso.cpp
+    addiesKaentakeCompile.cpp
+    BossHP.cpp
+    chronicle_extras.cpp
+    enlargequickslot.cpp
+    v83_version_guard.cpp
+    shoulderslots.cpp
+    iscorrectbodypart.cpp
+    getbodypartfromitem.cpp
+    ext_chainlightning.cpp
+    getmobinfobyid.cpp
+    getnpcbyid.cpp
+    worldmapinfo.cpp
 )
 
 target_precompile_headers(injector PRIVATE pch.h)
 
+target_compile_definitions(injector PRIVATE KAENTAKE_TARGET_v83)
+
 target_link_libraries(injector PRIVATE
     Detours
     WzLib
+    winhttp
 )
 
 set_target_properties(injector PROPERTIES
@@ -41,12 +61,15 @@ add_executable(launcher WIN32
     launcher.rc
     launcher.cpp
     debug.cpp
+    patcher.cpp
 )
 
 target_link_options(launcher PRIVATE "/MANIFEST:NO")
 
 target_link_libraries(launcher PRIVATE
     Detours
+    winhttp
+    bcrypt
 )
 
 set_target_properties(launcher PROPERTIES
