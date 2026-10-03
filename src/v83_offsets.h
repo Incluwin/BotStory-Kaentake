@@ -86,4 +86,18 @@ constexpr size_t kUncapStatSiteCount =
 constexpr unsigned char kUncapStatTable[] = { 0xFF, 0xFE, 12 };
 }  // namespace stats
 
+// ---------------------------------------------------------------------------
+// Quest window list rows (questcolor.cpp): CUIQuestInfo::Draw picks each unselected quest row's font.
+namespace quest {
+constexpr uintptr_t kQuestWndDraw      = 0x00883126;  // CUIQuestInfo::Draw (vtable 0xB3A9EC slot 11)
+constexpr uintptr_t kQuestIdRead       = 0x00883FC9;  // mov eax,[ebp-0x2C]; mov ax,[eax]: the row's quest id
+constexpr uintptr_t kQuestPickFontSite = 0x00884090;  // test esi,esi; ...; lea ecx grey/black font
+constexpr uintptr_t kQuestFontCall     = 0x008840AC;  // call kComPtrGet -> font for DrawText (patched)
+constexpr uintptr_t kComPtrGet         = 0x004284A5;  // IWzFontPtr getter: mov eax,[ecx]; ret
+constexpr uintptr_t kGetBasicFont      = 0x0098A707;  // get_basic_font(IWzFontPtr*, type)
+constexpr int kFontBlue = 4;                          // Arial 12, 0xFF2000FF (type 1 is the same in black)
+constexpr unsigned int kResidentQuestMin = 30000;     // living-world quest-log ids (server quest-log-ids.yaml)
+constexpr unsigned int kResidentQuestMax = 32767;
+}  // namespace quest
+
 }  // namespace v83

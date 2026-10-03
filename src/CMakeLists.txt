@@ -32,6 +32,7 @@ add_library(injector SHARED
     getmobinfobyid.cpp
     getnpcbyid.cpp
     worldmapinfo.cpp
+    questcolor.cpp
 )
 
 target_precompile_headers(injector PRIVATE pch.h)

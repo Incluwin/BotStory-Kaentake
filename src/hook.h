@@ -67,6 +67,7 @@ void AttachIsCorrectBodyPartFix();
 void AttachGetBodyPartFromItemFix();
 void AttachExtChainLightning();
 void AttachMapInfoToolTip();
+void AttachQuestListColorMod();
 
 inline void AttachClientHooks() {
     AttachClientBypass();
@@ -92,6 +93,7 @@ inline void AttachClientHooks() {
     AttachFreeAddy();
     AttachExtChainLightning();
     AttachMapInfoToolTip();
+    AttachQuestListColorMod();
 }
 
 
