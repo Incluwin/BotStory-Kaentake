@@ -6,8 +6,8 @@
 #include "ztl/ztl.h"
 
 
-static IWzPropertyPtr g_pPropMinute;
-static IWzPropertyPtr g_pPropSecond;
+static auto& g_pPropMinute = *new IWzPropertyPtr();
+static auto& g_pPropSecond = *new IWzPropertyPtr();
 
 void DrawDuration(IWzCanvasPtr pCanvas, int nSeconds, int nX = 0, int nY = 0) {
     if (!g_pPropMinute) {

@@ -18,7 +18,8 @@ public:
     }
 };
 
-static std::map<int, IWzPropertyPtr> g_mPropItemEffect;
+// Never destroyed: PCOM.DLL is gone by DLL detach, so a Release here would fault.
+static auto& g_mPropItemEffect = *new std::map<int, IWzPropertyPtr>();
 
 static auto CItemInfo__IterateItemInfo = reinterpret_cast<int(__thiscall*)(CItemInfo*)>(0x005CA71C);
 int __fastcall CItemInfo__IterateItemInfo_hook(CItemInfo* pThis, void* _EDX) {

@@ -4,8 +4,8 @@
 #include "ztl/ztl.h"
 
 
-static IWzCanvasPtr g_pCanvasHpBack;
-static IWzPropertyPtr g_pPropHpNum;
+static auto& g_pCanvasHpBack = *new IWzCanvasPtr();
+static auto& g_pPropHpNum = *new IWzPropertyPtr();
 
 class CField {
 public:

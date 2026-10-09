@@ -80,7 +80,7 @@ void ApplyQuickslotOverride(const char* caller_tag) {
 }
 
 
-static IWzNameSpacePtr g_pCustomNameSpace;
+static auto& g_pCustomNameSpace = *new IWzNameSpacePtr();
 static std::vector<Ztl_bstr_t> g_vecOverrides;
 
 class IWzNameSpaceImpl {
@@ -254,7 +254,7 @@ void CWvsApp::InitializeResMan_hook() {
 
 void CWvsApp::CleanUp_hook() {
     CWvsApp::CleanUp(this);
-    g_pCustomNameSpace = nullptr;
+    g_pCustomNameSpace.Detach(); // the original CleanUp has unloaded PCOM; do not Release
 }
 
 
