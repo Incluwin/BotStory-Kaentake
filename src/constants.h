@@ -12,3 +12,11 @@
 
 extern char* g_sServerHost;
 extern long g_nServerPort;
+
+// Caps used by addiesKaentakeCompile.cpp
+#define CONSTANTS_DAMAGE_CAP 999999.0
+#define CONSTANTS_SPEED_CAP  250
+
+// Declared in resolution.cpp
+int get_screen_width();
+int get_screen_height();

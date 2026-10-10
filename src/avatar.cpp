@@ -18,13 +18,33 @@ void CAvatar::Constructor_hook() {
 }
 
 void CAvatar::Destructor_hook() {
-    delete m_pCustomData;
+    // Some preview-avatar instantiation paths (char-create UI, world/channel
+    // UI, charsel with 1+ existing chars) skip our Constructor_hook, leaving
+    // m_pCustomData as whatever was at offset 0x484 when the object was
+    // allocated. Guard every read/write so a stale pointer doesn't get
+    // dereferenced on destruction.
+    if (m_pCustomData) {
+        delete m_pCustomData;
+        CustomData* pNull = nullptr;
+        m_pCustomData = pNull;  // MEMBER_AT setter needs an lvalue
+    }
     CAvatar::Destructor(this);
 }
 
 void CAvatar::RegisterNextBlink_hook() {
-    m_pCustomData->bBlinking = 0;
+    if (m_pCustomData) {
+        m_pCustomData->bBlinking = 0;
+    }
     m_tNextBlink = CWvsApp::GetInstance()->m_tUpdateTime + (rand() % 3000) + 2000;
+}
+
+// Safe fallback that the naked Update hooks call when m_pCustomData is null.
+// We construct CustomData lazily so subsequent ticks use the hijacked path.
+extern "C" void __cdecl CAvatar_EnsureCustomData(CAvatar* pAvatar) {
+    if (pAvatar && !pAvatar->m_pCustomData) {
+        auto p = new CAvatar::CustomData{};
+        pAvatar->m_pCustomData = p;  // MEMBER_AT setter needs an lvalue
+    }
 }
 
 static auto CAvatar__Update_jmp1 = 0x004534CC;
@@ -32,6 +52,14 @@ static auto CAvatar__Update_ret1 = 0x004534D2;
 void __declspec(naked) CAvatar__Update_hook1() {
     __asm {
         mov     ecx, [ ebx + 0x484 ]
+        test    ecx, ecx
+        jnz     hook1_ok
+        // Lazily allocate CustomData for preview avatars that skipped our ctor.
+        push    ebx
+        call    CAvatar_EnsureCustomData
+        add     esp, 4
+        mov     ecx, [ ebx + 0x484 ]
+    hook1_ok:
         cmp     [ ecx ], edi
         jmp     [ CAvatar__Update_ret1 ]
     }
@@ -42,6 +70,13 @@ static auto CAvatar__Update_ret2 = 0x0045361C;
 void __declspec(naked) CAvatar__Update_hook2() {
     __asm {
         mov     eax, [ ebx + 0x484 ]
+        test    eax, eax
+        jnz     hook2_ok
+        push    ebx
+        call    CAvatar_EnsureCustomData
+        add     esp, 4
+        mov     eax, [ ebx + 0x484 ]
+    hook2_ok:
         mov     [ eax ], 1
         jmp     [ CAvatar__Update_ret2 ]
     }
@@ -54,7 +89,7 @@ void CAvatar::SetRidingVehicle_hook(int nVehicleID) {
         reinterpret_cast<void(__thiscall*)(CAvatar*, int)>(0x00453A29)(this, 0);
         // Handle tamingMob chair
         m_nRidingVehicleID = nVehicleID;
-        if (!nVehicleID && m_pCustomData->nRidingChairID) {
+        if (!nVehicleID && m_pCustomData && m_pCustomData->nRidingChairID) {
             m_nRidingVehicleID = m_pCustomData->nRidingChairID;
         }
         PrepareActionLayer(6, 100, 0);
@@ -80,6 +115,9 @@ public:
 
 void CUser::Update_hook() {
     CUser::Update(this);
+    if (!m_CAvatar.m_pCustomData) {
+        return;  // preview avatar path that skipped our ctor; nothing to do
+    }
     POINT p = m_CAvatar.m_pCustomData->ptBodyRelMove;
     if (p.x || p.y) {
         m_CAvatar.m_pBodyOrigin->RelMove(p.x, p.y);
@@ -88,6 +126,9 @@ void CUser::Update_hook() {
 
 void CUser::SetActivePortableChair_hook(int nItemID) {
     CUser::SetActivePortableChair(this, nItemID);
+    if (!m_CAvatar.m_pCustomData) {
+        return;  // preview avatar path that skipped our ctor
+    }
     if (nItemID == 0) {
         m_CAvatar.m_pCustomData->ptBodyRelMove = { 0, 0 };
         if (m_CAvatar.m_nRidingVehicleID / 1000 == TAMINGMOB_ID_PREFIX) {

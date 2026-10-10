@@ -27,6 +27,11 @@ int get_screen_width();
 int get_screen_height();
 int get_adjust_cy();
 
+// implementation in resman.cpp -- swap UI/StatusBar.img/base/quickSlot to the
+// variant matching the current screen width. Call after WZ tree is mounted
+// (from the Serialize hook) and on runtime resolution changes.
+void ApplyQuickslotOverride(const char* caller_tag);
+
 // implementation in inlink.cpp
 IUnknownPtr* __cdecl get_unknown_hook(IUnknownPtr* result, Ztl_variant_t& v);
 inline IUnknownPtr get_unknown(Ztl_variant_t& v) {

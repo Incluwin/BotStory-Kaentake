@@ -1,0 +1,29 @@
+Licensing of this repository
+============================
+
+This repository is the BotStory fork of iw2d/kaentake (https://github.com/iw2d/kaentake).
+Different parts of it are under different terms.
+
+Upstream code
+-------------
+iw2d/kaentake, and the iw2d/WzLib submodule (external/WzLib), are published without a
+licence. Their authors keep all rights to that code. Nothing in this repository grants
+any rights to it.
+
+The stat_all_ap and beginner_ap modules (branch mod/loganml-ap) are ported from
+LoganML/kaentake, which is also published without a licence. The same applies to the
+code taken from it.
+
+BotStory's changes
+------------------
+The changes made in commits authored by Incluwin (the BotStory fork) are licensed under
+the GNU Affero General Public License, version 3. The full text is in
+LICENSE-AGPL-3.0.txt. This covers only those changes, not the upstream code they modify
+or build on.
+
+Other components
+----------------
+Microsoft Detours (external/Detours) is under its own MIT licence.
+
+MapleStory and its game data belong to NEXON. Custom.wz contains UI art derived from the
+v83 client's own data.
