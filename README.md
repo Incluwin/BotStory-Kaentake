@@ -1,6 +1,6 @@
-### FriendStory fork
+### BotStory fork
 
-This is the FriendStory fork of [iw2d/kaentake](https://github.com/iw2d/kaentake).
+This is the BotStory fork of [iw2d/kaentake](https://github.com/iw2d/kaentake).
 On top of the upstream hooks (resolution, quickslot, tooltip, etc.) it adds:
 
 - **Self-patching launcher.** `Launch Game.exe` (the renamed `Kaentake.exe`)

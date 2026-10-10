@@ -58,7 +58,7 @@ void EnsureConsole() {
     FILE* f = nullptr;
     freopen_s(&f, "CONOUT$", "w", stdout);
     freopen_s(&f, "CONOUT$", "w", stderr);
-    SetConsoleTitleA("FriendStory Patcher");
+    SetConsoleTitleA("BotStory Patcher");
     g_console_attached = true;
 }
 
@@ -519,7 +519,7 @@ bool SaveCache(const CacheMap& cache) {
                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (fh == INVALID_HANDLE_VALUE) return false;
 
-    std::string body = "# FriendStory patcher cache v1\n"
+    std::string body = "# BotStory patcher cache v1\n"
                        "# <size> <mtime_u64> <sha256> <path>\n";
     char line[512];
     for (const auto& kv : cache) {
@@ -659,7 +659,7 @@ bool PatcherRun() {
     if (!HttpGetBytes(base, manifest_path, manifest_body, MANIFEST_TIMEOUT_MS)) {
         Log("could not reach patch server (%s)", patch_url.c_str());
         bool cont = AskContinue(
-            "FriendStory",
+            "BotStory",
             "Could not reach the patch server.\n\n"
             "Play with your current files?\n"
             "(Click No to quit and try again later.)");
@@ -671,7 +671,7 @@ bool PatcherRun() {
     if (!ParseManifest(manifest_body, entries) || entries.empty()) {
         Log("manifest was empty or invalid");
         bool cont = AskContinue(
-            "FriendStory",
+            "BotStory",
             "Patch server returned an invalid manifest.\n\n"
             "Play with your current files?");
         DetachConsole();
