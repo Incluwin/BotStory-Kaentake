@@ -16,6 +16,8 @@ enum Verb : unsigned char {
 };
 enum RowFlag : int {
     ROW_CALL = 1, ROW_BENCH = 2, ROW_SWAP_OUT = 4, ROW_SWAP_IN = 8, ROW_GUEST = 16, ROW_COMMITTED = 32,
+    ROW_OUT = 64,       // out with the owner: one a SWAP_IN row may take over from
+    ROW_CAN_COME = 128, // at camp and can come at once: one a SWAP_OUT row may make room for
 };
 enum SnapFlag : int { SNAP_USUAL = 1, SNAP_SOMEONE_OUT = 2 };
 

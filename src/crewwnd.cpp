@@ -277,9 +277,11 @@ public:
 
     // ---- what each button would do now ----
 
-    // as the server: the one out may let someone take its place, or the one at camp may swap in for it
+    // a pair one of the card's swap pickers lists: the one out makes room for one at camp who can come at once, or
+    // the one at camp swaps in for one out with the owner
     static bool CanSwap(const Row* out, const Row* in) {
-        return out && in && ((out->flags & ROW_SWAP_OUT) || (in->flags & ROW_SWAP_IN));
+        return out && in && (((out->flags & ROW_SWAP_OUT) && (in->flags & ROW_CAN_COME))
+                             || ((in->flags & ROW_SWAP_IN) && (out->flags & ROW_OUT)));
     }
 
     const Row* SelParty() const { return FindRow(m_selParty); }
@@ -685,14 +687,14 @@ Snapshot SampleSnapshot() {
     s.benchSeats = 6;
     s.seatsNote = L"(1 seat kept)";
     s.flags = SNAP_USUAL | SNAP_SOMEONE_OUT;
-    s.party.push_back(SampleRow("halvard", L"Halvard", L"Lv52 Crusader", L"Perion - HP 90%", 90, ROW_BENCH | ROW_SWAP_OUT));
-    s.party.push_back(SampleRow("casse", L"Casse", L"Lv48 Priest", L"at the store - HP 100%", 100, ROW_BENCH | ROW_SWAP_OUT));
+    s.party.push_back(SampleRow("halvard", L"Halvard", L"Lv52 Crusader", L"Perion - HP 90%", 90, ROW_BENCH | ROW_SWAP_OUT | ROW_OUT));
+    s.party.push_back(SampleRow("casse", L"Casse", L"Lv48 Priest", L"at the store - HP 100%", 100, ROW_BENCH | ROW_SWAP_OUT | ROW_OUT));
     s.party.push_back(SampleRow("kestrel", L"Kestrel", L"Lv50 Ranger", L"on the way (0:40)", 255, 0));
-    s.bench.push_back(SampleRow("lioren", L"Lioren", L"Lv47 Wizard", L"train @ Ant Tunnel I - 12% EXP banked", 255, ROW_CALL | ROW_SWAP_IN));
-    s.bench.push_back(SampleRow("icecookie", L"IceCookie", L"Lv45 Cleric", L"farm @ Sleepywood - 143/200 Stolen Fence - ready to level - 3,120 meso, 4 stacks", 255, ROW_CALL | ROW_SWAP_IN));
-    s.bench.push_back(SampleRow("pell", L"Pell", L"Lv44 Bandit", L"away: rest @ Perion - resting", 255, ROW_CALL | ROW_SWAP_IN));
-    s.bench.push_back(SampleRow("rurik", L"Rurik", L"Lv43 Page", L"sell - out of supplies", 255, ROW_CALL | ROW_SWAP_IN));
-    s.bench.push_back(SampleRow("fenna", L"Fenna", L"Lv41 Assassin", L"gather @ Kerning City", 255, ROW_CALL | ROW_SWAP_IN));
+    s.bench.push_back(SampleRow("lioren", L"Lioren", L"Lv47 Wizard", L"train @ Ant Tunnel I - 12% EXP banked", 255, ROW_CALL | ROW_SWAP_IN | ROW_CAN_COME));
+    s.bench.push_back(SampleRow("icecookie", L"IceCookie", L"Lv45 Cleric", L"farm @ Sleepywood - 143/200 Stolen Fence - ready to level - 3,120 meso, 4 stacks", 255, ROW_CALL | ROW_SWAP_IN | ROW_CAN_COME));
+    s.bench.push_back(SampleRow("pell", L"Pell", L"Lv44 Bandit", L"away: rest @ Perion - resting", 255, ROW_CALL | ROW_SWAP_IN | ROW_CAN_COME));
+    s.bench.push_back(SampleRow("rurik", L"Rurik", L"Lv43 Page", L"sell - out of supplies", 255, ROW_CALL | ROW_SWAP_IN | ROW_CAN_COME));
+    s.bench.push_back(SampleRow("fenna", L"Fenna", L"Lv41 Assassin", L"gather @ Kerning City", 255, ROW_CALL | ROW_SWAP_IN | ROW_CAN_COME));
     return s;
 }
 
