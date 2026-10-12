@@ -68,6 +68,8 @@ void AttachGetBodyPartFromItemFix();
 void AttachExtChainLightning();
 void AttachMapInfoToolTip();
 void AttachQuestListColorMod();
+void AttachCrewWindowMod();
+void CrewWindowOnConnect();
 
 inline void AttachClientHooks() {
     AttachClientBypass();
@@ -94,6 +96,7 @@ inline void AttachClientHooks() {
     AttachExtChainLightning();
     AttachMapInfoToolTip();
     AttachQuestListColorMod();
+    AttachCrewWindowMod();
 }
 
 

@@ -38,8 +38,8 @@ namespace v83 {
 //   2. Watch DebugView for "[v83] MapleStory.exe SizeOfImage=0x.... TimeDateStamp=0x....".
 //   3. Paste those values here, rebuild.
 // ---------------------------------------------------------------------------
-constexpr uint32_t kExpectedImageSize     = 0;  // IMAGE_OPTIONAL_HEADER::SizeOfImage
-constexpr uint32_t kExpectedTimeDateStamp = 0;  // IMAGE_FILE_HEADER::TimeDateStamp
+constexpr uint32_t kExpectedImageSize     = 0x00A92000;  // IMAGE_OPTIONAL_HEADER::SizeOfImage (BotStory LAA exe)
+constexpr uint32_t kExpectedTimeDateStamp = 0x4B7C15C9;  // IMAGE_FILE_HEADER::TimeDateStamp (same as the stock exe)
 
 namespace skills {
 // Big Bang (Bishop / I-L Arch Mage / F-P Arch Mage) remove-charge caves.
@@ -99,5 +99,35 @@ constexpr int kFontBlue = 4;                          // Arial 12, 0xFF2000FF (t
 constexpr unsigned int kResidentQuestMin = 30000;     // living-world quest-log ids (server quest-log-ids.yaml)
 constexpr unsigned int kResidentQuestMax = 32767;
 }  // namespace quest
+
+// ---------------------------------------------------------------------------
+// Native Crew window (crewwnd.cpp). From an unpacked dump of the shipped build (2026-10-08 crash dump image).
+// Only the Crew window hooks check the fingerprint above; nothing else calls the guard.
+namespace crew {
+constexpr unsigned short kRecvOpcode     = 0x17A;       // server -> client (server SendOpcode.CREW_WINDOW)
+constexpr unsigned short kSendOpcode     = 0x117;       // client -> server (server RecvOpcode.CREW_WINDOW)
+constexpr unsigned short kSetFieldOpcode = 0x7D;        // SET_FIELD: HELLO follows the first one of a connection
+constexpr int kProtocol = 1;
+constexpr int kDllBuild = 20261012;
+constexpr uintptr_t kProcessPacket        = 0x004965F1; // CClientSocket::ProcessPacket(CInPacket&), from ManipulatePacket 0x004965C4
+constexpr uintptr_t kSendPacket           = 0x0049637B; // CClientSocket::SendPacket(const COutPacket&)
+constexpr uintptr_t kClientSocketInstance = 0x00BE7914; // TSingleton<CClientSocket>::ms_pInstance
+constexpr uintptr_t kWvsContextInstance   = 0x00BE7918; // TSingleton<CWvsContext>::ms_pInstance
+constexpr uintptr_t kContextOnKey         = 0x00A07431; // CWvsContext key handler, as CUIWnd::OnKey (0x0092C6EE) forwards
+constexpr uintptr_t kProcessKey           = 0x009E40F1; // CWndMan::ProcessKey(msg, wParam, lParam), from CWvsApp::ISMsgProc
+constexpr uintptr_t kWndManFocus          = 0x88;       // CWndMan: the focused IUIMsgHandler (CWndMan+4 = none)
+constexpr uintptr_t kFuncKeyMappedMan     = 0x00BED5A0; // TSingleton<CFuncKeyMappedMan>::ms_pInstance (ctor 0x0058DD0D)
+constexpr uintptr_t kFuncKeyMappedOffset  = 0x4;        // FUNCKEY_MAPPED[89] { char nType; long nID; }
+constexpr int kFuncKeySlots = 89;
+constexpr uintptr_t kOnLeaveGame          = 0x00A041FF; // CWvsContext::OnLeaveGame
+constexpr uintptr_t kClearFieldUI         = 0x00A04920; // CWvsContext::ClearFieldUI (Cash Shop / MTS stage Init)
+constexpr uintptr_t kRttiCWnd             = 0x00BF1608; // CWnd::ms_RTTI (CUIWnd's 0x00BF11DC points here)
+constexpr uintptr_t kGetBasicFont         = 0x0098A707; // get_basic_font(IWzFontPtr*, type)
+constexpr uintptr_t kPlayUiSound          = 0x00989588; // play_ui_sound(L"leaf"), prefixes Sound.wz/UI.img/
+constexpr int kFontBlack = 1;      // 12px 0xFF000000
+constexpr int kFontDarkGrey = 2;   // 12px 0xFF404040
+constexpr int kFontLightGrey = 17; // 12px 0xFFBBBBBB
+constexpr int kFontBlackBold = 29; // 12px 0xFF000000, style SP 0x583
+}  // namespace crew
 
 }  // namespace v83
