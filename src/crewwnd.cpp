@@ -100,21 +100,24 @@ void SendAction(Verb verb, const Row* a, const Row* b) {
 
 // ---- the window -------------------------------------------------------------------------------------------------
 
-// Layout on the UserList background (312 x 389): title bar 0-25 (drag), white panel ~47-333, button bar ~336-386.
+// Layout on the Crew background (Custom.wz UI/UIWindow.img/CrewWnd/backgrnd, 312 x 430: the UserList background with
+// 41 more panel rows and the title MAPLE CREW): title bar 0-25 (drag), white panel 47 to height-58, button bar below.
+// Without Custom.wz art it falls back to the 312 x 389 UserList background and draws the title itself.
 constexpr int kWndW = 312;
-constexpr int kWndH = 389;
+constexpr int kWndHDefault = 430;
 constexpr int kTitleH = 25;
 constexpr int kLeft = 10;
 constexpr int kRight = 302;
 constexpr int kPartyTop = 50;
 constexpr int kRowH = 28;
-constexpr int kPanelBottom = 332;
 constexpr int kBtnW = 46;
 constexpr int kBtnH = 18;
-constexpr int kBtnRow1 = 342;
-constexpr int kBtnRow2 = 364;
 constexpr int kCloseX = 291;
 constexpr int kCloseY = 7;
+int g_nWndH = kWndHDefault;  // the background's height: the panel and the button bar follow it
+inline int PanelBottom() { return g_nWndH - 57; }
+inline int BtnRow1() { return g_nWndH - 47; }
+inline int BtnRow2() { return g_nWndH - 25; }
 
 enum Button { BT_NONE = 0, BT_CALL, BT_BENCH, BT_SWAP, BT_CARD, BT_USUAL, BT_MORE,
               BT_FOLLOW, BT_WAIT, BT_GATHER, BT_REBUFF, BT_CLOSE, BT_COUNT };
@@ -148,6 +151,7 @@ public:
     int m_nPressedBtn = BT_NONE;
     std::string m_hoverRow;
     bool m_bClosing = false;
+    bool m_bOwnTitle = false;   // no Custom.wz art: the stock background's title is covered and "Crew" drawn
 
     // a press on a row that may become a drag
     std::string m_dragId;
@@ -164,12 +168,12 @@ public:
 
     CCrewWnd() {
         ms_pInstance = this;
+        LoadArt(); // before CreateWnd: the background decides the height
         int x = g_nSavedLeft != INT_MIN ? g_nSavedLeft : (get_screen_width() - kWndW) / 2;
-        int y = g_nSavedTop != INT_MIN ? g_nSavedTop : (get_screen_height() - kWndH) / 2;
+        int y = g_nSavedTop != INT_MIN ? g_nSavedTop : (get_screen_height() - g_nWndH) / 2;
         x = (std::max)(0, (std::min)(x, get_screen_width() - kWndW));
-        y = (std::max)(0, (std::min)(y, get_screen_height() - kWndH));
-        CWnd::CreateWnd(this, x, y, kWndW, kWndH, 10, 1, nullptr, 0);
-        LoadArt();
+        y = (std::max)(0, (std::min)(y, get_screen_height() - g_nWndH));
+        CWnd::CreateWnd(this, x, y, kWndW, g_nWndH, 10, 1, nullptr, 0);
         play_ui_sound(L"MenuUp");
         InvalidateRect(nullptr);
     }
@@ -194,8 +198,18 @@ public:
         return p;
     }
     void LoadArt() {
-        m_pBg = Sprite(L"Custom/UI/CrewWnd.img/backgrnd");
+        m_pBg = Sprite(L"Custom/UI/UIWindow.img/CrewWnd/backgrnd");
+        m_bOwnTitle = !m_pBg;
         if (!m_pBg) m_pBg = Sprite(L"UI/UIWindow.img/UserList/backgrnd");
+        g_nWndH = 389;
+        if (m_pBg) {
+            try {
+                UINT h = 0;
+                m_pBg->get_height(&h);
+                if (h >= 300 && h <= 700) g_nWndH = static_cast<int>(h);
+            } catch (...) {
+            }
+        }
         m_pClose[0] = Sprite(L"UI/Basic.img/BtClose/normal/0");
         m_pClose[1] = Sprite(L"UI/Basic.img/BtClose/mouseOver/0");
         m_pClose[2] = Sprite(L"UI/Basic.img/BtClose/pressed/0");
@@ -212,7 +226,7 @@ public:
         return kPartyTop + 16 + rows * kRowH + 6;
     }
     int BenchTop() const { return BenchHeaderY() + 16; }
-    int BenchVisible() const { return (std::max)(1, (kPanelBottom - BenchTop()) / kRowH); }
+    int BenchVisible() const { return (std::max)(1, (PanelBottom() - BenchTop()) / kRowH); }
     void ClampScroll() {
         int maxScroll = (std::max)(0, static_cast<int>(g_snap.bench.size()) - BenchVisible());
         m_nBenchScroll = (std::max)(0, (std::min)(m_nBenchScroll, maxScroll));
@@ -225,7 +239,7 @@ public:
         int gap = 3;
         int total = count * kBtnW + (count - 1) * gap;
         int x = (kWndW - total) / 2 + index * (kBtnW + gap);
-        int y = bt <= BT_MORE ? kBtnRow1 : kBtnRow2;
+        int y = bt <= BT_MORE ? BtnRow1() : BtnRow2();
         return {x, y, x + kBtnW, y + kBtnH};
     }
 
@@ -259,9 +273,14 @@ public:
         return hit;
     }
     bool InPartyBlock(int y) const { return y >= kPartyTop && y < BenchHeaderY(); }
-    bool InBenchBlock(int y) const { return y >= BenchHeaderY() && y < kPanelBottom; }
+    bool InBenchBlock(int y) const { return y >= BenchHeaderY() && y < PanelBottom(); }
 
     // ---- what each button would do now ----
+
+    // as the server: the one out may let someone take its place, or the one at camp may swap in for it
+    static bool CanSwap(const Row* out, const Row* in) {
+        return out && in && ((out->flags & ROW_SWAP_OUT) || (in->flags & ROW_SWAP_IN));
+    }
 
     const Row* SelParty() const { return FindRow(m_selParty); }
     const Row* SelBench() const { return FindRow(m_selBench); }
@@ -273,7 +292,7 @@ public:
         switch (bt) {
         case BT_CALL: return (b && (b->flags & ROW_CALL)) || (!b && p && (p->flags & ROW_CALL));
         case BT_BENCH: return p && (p->flags & ROW_BENCH);
-        case BT_SWAP: return p && b && (p->flags & ROW_SWAP_OUT) && (b->flags & ROW_SWAP_IN);
+        case BT_SWAP: return CanSwap(p, b);
         case BT_CARD: return FindRow(m_lastPicked) != nullptr;
         case BT_USUAL: return (g_snap.flags & SNAP_USUAL) != 0;
         case BT_MORE: return true;
@@ -414,13 +433,14 @@ public:
             if (m_pBg) {
                 c->CopyEx(0, 0, m_pBg, CANVAS_ALPHATYPE::CA_OVERWRITE, 0, 0, 0, 0, 0, 0, Ztl_variant_t());
             } else {
-                Fill(c, 0, 0, kWndW, kWndH, 0xFFF4F6FA);
+                Fill(c, 0, 0, kWndW, g_nWndH, 0xFFF4F6FA);
             }
         } catch (...) {
         }
-        // title: cover the stock label and name the window
-        Fill(c, 6, 8, 160, 12, 0xFFFFFFFF);
-        Text(c, m_pFontBold, 8, 7, L"Crew");
+        if (m_bOwnTitle) { // the stock background's label is "MAPLE USER LIST & GUILD"
+            Fill(c, 8, 10, 142, 7, 0xFFFFFFFF);
+            Text(c, m_pFontBold, 8, 7, L"Crew");
+        }
 
         IWzCanvasPtr pClose = m_pClose[m_nPressedBtn == BT_CLOSE ? 2 : m_nHoverBtn == BT_CLOSE ? 1 : 0];
         if (!pClose) pClose = m_pClose[0];
@@ -464,7 +484,7 @@ public:
             }
             if (m_nBenchScroll > 0) Text(c, m_pFontGrey, kRight - 8, bh, L"\x25B2");
             if (m_nBenchScroll + visible < static_cast<int>(g_snap.bench.size())) {
-                Text(c, m_pFontGrey, kRight - 8, kPanelBottom - 14, L"\x25BC");
+                Text(c, m_pFontGrey, kRight - 8, PanelBottom() - 14, L"\x25BC");
             }
         }
         for (int bt = BT_CALL; bt < BT_CLOSE; ++bt) {
@@ -515,7 +535,7 @@ public:
         if (!from) return;
         RowHit target = HitRow(x, y);
         if (m_dragFromParty) {
-            if (target.row && !target.party && (from->flags & ROW_SWAP_OUT) && (target.row->flags & ROW_SWAP_IN)) {
+            if (target.row && !target.party && CanSwap(from, target.row)) {
                 SendAction(VERB_SWAP, from, target.row);
             } else if (InBenchBlock(y) && (from->flags & ROW_BENCH)) {
                 SendAction(VERB_BENCH, from, nullptr);
@@ -523,7 +543,7 @@ public:
                 return;
             }
         } else {
-            if (target.row && target.party && (target.row->flags & ROW_SWAP_OUT) && (from->flags & ROW_SWAP_IN)) {
+            if (target.row && target.party && CanSwap(target.row, from)) {
                 SendAction(VERB_SWAP, target.row, from);
             } else if (InPartyBlock(y) && (from->flags & ROW_CALL)) {
                 SendAction(VERB_CALL, from, nullptr);
@@ -810,8 +830,15 @@ bool NoControlFocused(void* pWndMan) {
 auto CWndMan__ProcessKey = reinterpret_cast<int(__thiscall*)(void*, unsigned int, unsigned int, int)>(kProcessKey);
 
 int __fastcall CWndMan__ProcessKey_hook(void* pThis, void* /*edx*/, unsigned int msg, unsigned int wParam, int lParam) {
-    if (msg == WM_KEYDOWN && wParam == g_uHotkeyVk && !(lParam & 0x40000000) && (g_bEnabled || g_bSelfTest)) {
+    // the client sends a release as WM_KEYDOWN too, with bit 31 set (CWndMan::ProcessKey tests it first)
+    if (msg == WM_KEYDOWN && wParam == g_uHotkeyVk && !(lParam & 0xC0000000) && (g_bEnabled || g_bSelfTest)) {
         int scan = (lParam >> 16) & 0xFF;
+        static int s_nLogged = 0;
+        if (s_nLogged < 5) {
+            ++s_nLogged;
+            crew_log("hotkey lParam=%08X scan=%d focus-free=%d unbound=%d", static_cast<unsigned int>(lParam), scan,
+                     NoControlFocused(pThis) ? 1 : 0, KeyUnbound(scan) ? 1 : 0);
+        }
         if (NoControlFocused(pThis) && KeyUnbound(scan)) {
             if (CCrewWnd::ms_pInstance) {
                 CloseWindow(true);
@@ -841,9 +868,18 @@ void __fastcall CWvsContext__ClearFieldUI_hook(void* pThis, void* /*edx*/) {
     CWvsContext__ClearFieldUI(pThis);
 }
 
-UINT ReadHotkey() {
+// config.ini next to MapleStory.exe (the working directory is not always the game folder)
+std::string ConfigPath() {
+    char path[MAX_PATH] = {};
+    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    std::string s(path, n);
+    size_t slash = s.find_last_of("\\/");
+    return (slash == std::string::npos ? std::string(".") : s.substr(0, slash)) + "\\" CONSTANTS_CONFIG_NAME;
+}
+
+UINT ReadHotkey(const std::string& config) {
     char buf[16] = {};
-    GetPrivateProfileStringA("config", "crew_hotkey", "U", buf, sizeof(buf), ".\\" CONSTANTS_CONFIG_NAME);
+    GetPrivateProfileStringA("config", "crew_hotkey", "U", buf, sizeof(buf), config.c_str());
     char ch = buf[0];
     if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
     if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) return static_cast<UINT>(ch);
@@ -860,7 +896,8 @@ void CrewWindowOnConnect() {
 }
 
 void AttachCrewWindowMod() {
-    if (GetPrivateProfileIntA("config", "crew_window", 1, ".\\" CONSTANTS_CONFIG_NAME) == 0) {
+    std::string config = ConfigPath();
+    if (GetPrivateProfileIntA("config", "crew_window", 1, config.c_str()) == 0) {
         crew_log("off (config.ini crew_window=0)");
         return;
     }
@@ -868,12 +905,12 @@ void AttachCrewWindowMod() {
         crew_log("off: MapleStory.exe is not the build these offsets come from");
         return;
     }
-    g_uHotkeyVk = ReadHotkey();
-    g_bSelfTest = GetPrivateProfileIntA("config", "crew_selftest", 0, ".\\" CONSTANTS_CONFIG_NAME) != 0;
+    g_uHotkeyVk = ReadHotkey(config);
+    g_bSelfTest = GetPrivateProfileIntA("config", "crew_selftest", 0, config.c_str()) != 0;
     ATTACH_HOOK(CClientSocket__ProcessPacket, CClientSocket__ProcessPacket_hook);
     ATTACH_HOOK(CWndMan__ProcessKey, CWndMan__ProcessKey_hook);
     ATTACH_HOOK(CWvsContext__OnLeaveGame, CWvsContext__OnLeaveGame_hook);
     ATTACH_HOOK(CWvsContext__ClearFieldUI, CWvsContext__ClearFieldUI_hook);
     g_bHooksOn = true;
-    crew_log("on, hotkey %c", static_cast<char>(g_uHotkeyVk));
+    crew_log("on, hotkey %c%s", static_cast<char>(g_uHotkeyVk), g_bSelfTest ? ", self-test" : "");
 }

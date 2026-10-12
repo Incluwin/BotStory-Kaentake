@@ -4,3 +4,4 @@
 build/
 test/*.exe
 test/*.obj
+b/
