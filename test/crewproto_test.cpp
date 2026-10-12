@@ -94,6 +94,78 @@ static void StringLengthPastTheEnd() {
     CHECK(s.empty());
 }
 
+static Bytes SamplePage() {
+    Bytes p;
+    p.i32(4207);       // stamp
+    p.u8(PAGE_MENU);
+    p.u8(0);           // flags
+    p.str("#eThe crew#n\r\n");
+    p.u16(3);
+    p.u8(1); p.i32(4207000); p.str("Formation...");
+    p.u8(0); p.i32(0); p.str("\r\n(after the run)");
+    p.u8(1); p.i32(4207998); p.str("Back");
+    return p;
+}
+
+static void ParsesAPage() {
+    Bytes p = SamplePage();
+    Reader r{p.b.data(), p.b.size()};
+    Page pg;
+    CHECK(ReadPage(r, pg));
+    CHECK(pg.valid && pg.stamp == 4207 && pg.kind == PAGE_MENU && pg.flags == 0);
+    CHECK(pg.text == L"#eThe crew#n\r\n");
+    CHECK(pg.entries.size() == 3);
+    CHECK(pg.entries[0].option && pg.entries[0].selection == 4207000 && pg.entries[0].label == L"Formation...");
+    CHECK(!pg.entries[1].option && pg.entries[1].label == L"\r\n(after the run)");
+    CHECK(pg.entries[2].option && pg.entries[2].selection == 4207998);
+    CHECK(r.off == p.b.size());
+    for (size_t cut = 0; cut < p.b.size(); ++cut) {
+        Reader t{p.b.data(), cut};
+        Page q;
+        if (ReadPage(t, q)) {
+            std::printf("FAIL page truncated at %u parsed\n", static_cast<unsigned int>(cut));
+            ++g_failures;
+        }
+    }
+}
+
+static void RejectsBadPages() {
+    Bytes kind; // an unknown kind
+    kind.i32(1); kind.u8(9); kind.u8(0); kind.str("x"); kind.u16(0);
+    Reader r1{kind.b.data(), kind.b.size()};
+    Page p1;
+    CHECK(!ReadPage(r1, p1));
+    Bytes many; // more entries than any page
+    many.i32(1); many.u8(PAGE_MENU); many.u8(0); many.str(""); many.u16(500);
+    Reader r2{many.b.data(), many.b.size()};
+    Page p2;
+    CHECK(!ReadPage(r2, p2));
+    Bytes type; // an entry type that is neither heading nor option
+    type.i32(1); type.u8(PAGE_MENU); type.u8(0); type.str(""); type.u16(1); type.u8(7); type.i32(0); type.str("x");
+    Reader r3{type.b.data(), type.b.size()};
+    Page p3;
+    CHECK(!ReadPage(r3, p3));
+}
+
+static void ReadsMarkup() {
+    std::vector<Span> s = ParseMarkup(L"The lineups I keep:\r\n#eHunting#n: Halvard, #bCasse#k and #r50%#k");
+    CHECK(s.size() == 7);
+    CHECK(s[0].text == L"The lineups I keep:" && !s[0].bold && s[0].ink == INK_BLACK);
+    CHECK(s[1].lineBreak);
+    CHECK(s[2].text == L"Hunting" && s[2].bold);
+    CHECK(s[3].text == L": Halvard, " && !s[3].bold);
+    CHECK(s[4].text == L"Casse" && s[4].ink == INK_BLUE);
+    CHECK(s[5].text == L" and " && s[5].ink == INK_BLACK);
+    CHECK(s[6].text == L"50%" && s[6].ink == INK_RED);
+    // codes with arguments vanish with them; an unknown code and a lone '#' stay as text
+    std::vector<Span> t = ParseMarkup(L"Take #v2000000# and #L3#this#l, #h #! 100# #q");
+    std::wstring all;
+    for (auto& sp : t) all += sp.text;
+    CHECK(all == L"Take  and this, ! 100# ");
+    std::vector<Span> u = ParseMarkup(L"a\r\n\r\nb");
+    CHECK(u.size() == 4 && u[1].lineBreak && u[2].lineBreak && u[3].text == L"b");
+}
+
 static int Hex(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -132,6 +204,9 @@ int main(int argc, char** argv) {
     RejectsEveryTruncation();
     RejectsAbsurdCounts();
     StringLengthPastTheEnd();
+    ParsesAPage();
+    RejectsBadPages();
+    ReadsMarkup();
     if (argc > 1) ParsesServerGolden(argv[1]);
     std::printf(g_failures ? "%d FAILED\n" : "all passed\n", g_failures);
     return g_failures ? 1 : 0;

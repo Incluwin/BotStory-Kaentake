@@ -55,7 +55,9 @@ auto play_ui_sound = reinterpret_cast<void(__cdecl*)(const wchar_t*)>(kPlayUiSou
 bool g_bHooksOn = false;
 bool g_bHelloSent = false;  // on this connection
 bool g_bEnabled = false;    // the last WELCOME said this character may use the window
+int g_nProtocol = 0;        // the protocol the last WELCOME agreed (1: More opens the NPC Crew window, 2: pages)
 Snapshot g_snap;
+Page g_page;                // the server's page shown over the crew, protocol 2 (valid = shown)
 UINT g_uHotkeyVk = 'U';
 bool g_bSelfTest = false;   // config.ini crew_selftest=1: the hotkey opens a sample crew without a server (drawing checks)
 
@@ -98,6 +100,17 @@ void SendAction(Verb verb, const Row* a, const Row* b) {
     SendOut(o);
 }
 
+// The answer to a page, as the NPC reply: the page's stamp, the button (kReplyYes, kReplyNo, kReplyClose) and the
+// option's selection value (-1 for a button).
+void SendPageReply(int stamp, unsigned char action, int selection) {
+    COutPacket o(kSendOpcode);
+    o.Encode1(OP_PAGE_REPLY);
+    o.Encode4(static_cast<unsigned int>(stamp));
+    o.Encode1(action);
+    o.Encode4(static_cast<unsigned int>(selection));
+    SendOut(o);
+}
+
 // ---- the window -------------------------------------------------------------------------------------------------
 
 // Layout on the Crew background (Custom.wz UI/UIWindow.img/CrewWnd/backgrnd, 312 x 430: the UserList background with
@@ -120,7 +133,14 @@ inline int BtnRow1() { return g_nWndH - 47; }
 inline int BtnRow2() { return g_nWndH - 25; }
 
 enum Button { BT_NONE = 0, BT_CALL, BT_BENCH, BT_SWAP, BT_CARD, BT_USUAL, BT_MORE,
-              BT_FOLLOW, BT_WAIT, BT_GATHER, BT_REBUFF, BT_CLOSE, BT_COUNT };
+              BT_FOLLOW, BT_WAIT, BT_GATHER, BT_REBUFF, BT_CLOSE, BT_COUNT,
+              // the buttons under a page
+              PB_CLOSE = 100, PB_YES, PB_NO, PB_PREV, PB_NEXT };
+constexpr int kPageBtnW = 60;
+constexpr int kLineH = 14;
+constexpr int kPageW = kRight - kLeft;
+constexpr int kOptionIndent = 10;
+constexpr DWORD kPageReplyWaitMs = 3000;  // a reply the server never answered (an older page's) frees the page again
 
 const wchar_t* const kButtonLabel[BT_COUNT] = {
     L"", L"Call", L"Bench", L"Swap", L"Card", L"Usual", L"More",
@@ -160,6 +180,28 @@ public:
     int m_nDownX = 0, m_nDownY = 0, m_nMouseX = 0, m_nMouseY = 0;
     DWORD m_dwLastClick = 0;
     std::string m_lastClickId;
+
+    // the page view (protocol 2): the page laid out in runs of one font, relative to (kLeft, the page top)
+    struct Run {
+        int x, y;
+        std::wstring text;
+        int ink;
+        bool bold;
+    };
+    struct OptionBox {
+        int top, bottom;  // layout y, bottom exclusive
+        size_t entry;     // index into g_page.entries
+    };
+    IWzFontPtr m_pInk[INK_COUNT][2];  // plain, bold
+    std::vector<Run> m_runs;
+    std::vector<OptionBox> m_boxes;
+    int m_nPageH = 0;
+    int m_nPageScroll = 0;
+    bool m_bLayoutDirty = true;
+    int m_nHoverOption = -1;   // index into m_boxes
+    int m_nPressedOption = -1;
+    bool m_bPageWaiting = false;  // a reply went out: the page takes no clicks until the server answers
+    DWORD m_dwPageSent = 0;
 
     struct RowHit {
         const Row* row = nullptr;
@@ -217,6 +259,22 @@ public:
         m_pFont = Font(kFontBlack);
         m_pFontGrey = Font(kFontDarkGrey);
         m_pFontLight = Font(kFontLightGrey);
+        m_pInk[INK_BLACK][0] = m_pFont;
+        m_pInk[INK_BLACK][1] = m_pFontBold;
+        m_pInk[INK_BLUE][0] = Font(kFontBlue);
+        m_pInk[INK_BLUE][1] = Font(kFontBlueBold);
+        m_pInk[INK_RED][0] = Font(kFontRed);
+        m_pInk[INK_RED][1] = Font(kFontRedBold);
+        m_pInk[INK_PURPLE][0] = Font(kFontPurple);
+        m_pInk[INK_GREEN][0] = Font(kFontGreen);
+    }
+
+    // the font for a run: its ink and weight, else its ink plain, else black
+    IWzFontPtr& InkFont(int ink, bool bold) {
+        if (ink < 0 || ink >= INK_COUNT) ink = INK_BLACK;
+        if (m_pInk[ink][bold ? 1 : 0]) return m_pInk[ink][bold ? 1 : 0];
+        if (m_pInk[ink][0]) return m_pInk[ink][0];
+        return bold ? m_pFontBold : m_pFont;
     }
 
     // ---- geometry ----
@@ -313,7 +371,14 @@ public:
         case BT_SWAP: SendAction(VERB_SWAP, p, b); break;
         case BT_CARD: SendAction(VERB_CARD, FindRow(m_lastPicked), nullptr); break;
         case BT_USUAL: SendAction(VERB_USUAL, nullptr, nullptr); break;
-        case BT_MORE: SendAction(VERB_MORE, nullptr, nullptr); break;
+        case BT_MORE:
+            if (g_bSelfTest && !g_bEnabled) {
+                ShowSamplePage(0);
+            } else {
+                // protocol 2: the actions page in this window; protocol 1: the NPC Crew window
+                SendAction(g_nProtocol >= 2 ? VERB_ACTIONS : VERB_MORE, nullptr, nullptr);
+            }
+            break;
         case BT_FOLLOW: SendAction(VERB_FOLLOW, nullptr, nullptr); break;
         case BT_WAIT: SendAction(VERB_WAIT, nullptr, nullptr); break;
         case BT_GATHER: SendAction(VERB_GATHER, nullptr, nullptr); break;
@@ -346,9 +411,309 @@ public:
         InvalidateRect(nullptr);
     }
 
+    // ---- the page view (protocol 2) ----
+
+    void OnPage(Page&& page) {
+        g_page = std::move(page);
+        m_bLayoutDirty = true;
+        m_nPageScroll = 0;
+        m_nHoverOption = -1;
+        m_nPressedOption = -1;
+        m_bPageWaiting = false;
+        m_bDragging = false;
+        m_dragId.clear();
+        InvalidateRect(nullptr);
+    }
+
+    void OnPageClose(int stamp) {
+        if (!g_page.valid || (stamp != 0 && stamp != g_page.stamp)) return;
+        g_page = Page();
+        m_bPageWaiting = false;
+        m_nHoverBtn = BT_NONE;
+        m_nPressedBtn = BT_NONE;
+        InvalidateRect(nullptr);
+    }
+
+    int PageTop() const { return kPartyTop; }
+    int PageVisibleH() const { return PanelBottom() - PageTop(); }
+    void ClampPageScroll() {
+        int maxScroll = (std::max)(0, m_nPageH - PageVisibleH());
+        m_nPageScroll = (std::max)(0, (std::min)(m_nPageScroll, maxScroll));
+    }
+
+    // Lays spans out from (x0, y), word by word, wrapping at the page width; returns the y under the last line.
+    int Flow(const std::vector<Span>& spans, int x0, int y) {
+        if (spans.empty()) return y;
+        int x = x0;
+        for (const Span& sp : spans) {
+            if (sp.lineBreak) {
+                y += kLineH;
+                x = x0;
+                continue;
+            }
+            IWzFontPtr& f = InkFont(sp.ink, sp.bold);
+            const std::wstring& t = sp.text;
+            size_t i = 0;
+            while (i < t.size()) {
+                size_t j = i;
+                while (j < t.size() && t[j] != L' ') ++j;
+                size_t wordEnd = j;
+                while (j < t.size() && t[j] == L' ') ++j;
+                std::wstring word = t.substr(i, wordEnd - i);
+                std::wstring spaces = t.substr(wordEnd, j - wordEnd);
+                i = j;
+                int w = TextW(f, word);
+                if (x > x0 && x + w > kPageW) {
+                    y += kLineH;
+                    x = x0;
+                }
+                if (w > kPageW - x0) { // wider than a line: break it by characters
+                    std::wstring part;
+                    for (wchar_t ch : word) {
+                        if (!part.empty() && x + TextW(f, part + ch) > kPageW) {
+                            m_runs.push_back({x, y, part, sp.ink, sp.bold});
+                            y += kLineH;
+                            x = x0;
+                            part.clear();
+                        }
+                        part.push_back(ch);
+                    }
+                    word = part;
+                    w = TextW(f, word);
+                }
+                if (!word.empty()) m_runs.push_back({x, y, word, sp.ink, sp.bold});
+                x += w + TextW(f, spaces);
+            }
+        }
+        return y + kLineH;
+    }
+
+    void Layout() {
+        m_runs.clear();
+        m_boxes.clear();
+        int y = Flow(ParseMarkup(g_page.text), 0, 0);
+        for (size_t k = 0; k < g_page.entries.size(); ++k) {
+            const PageEntry& e = g_page.entries[k];
+            std::vector<Span> spans = ParseMarkup(e.label);
+            if (!e.option) {
+                y = spans.empty() ? y + kLineH : Flow(spans, 0, y);
+                continue;
+            }
+            int top = y;
+            y = Flow(spans, kOptionIndent, y + 2) + 2;
+            m_boxes.push_back({top, y, k});
+        }
+        m_nPageH = y;
+        m_bLayoutDirty = false;
+        ClampPageScroll();
+    }
+
+    int OptionAt(int x, int y) const {
+        if (!g_page.valid || x < kLeft - 4 || x > kRight + 4 || y < PageTop() || y >= PanelBottom()) return -1;
+        int ly = y - PageTop() + m_nPageScroll;
+        for (size_t b = 0; b < m_boxes.size(); ++b) {
+            if (ly >= m_boxes[b].top && ly < m_boxes[b].bottom) return static_cast<int>(b);
+        }
+        return -1;
+    }
+
+    std::vector<int> PageButtons() const {
+        switch (g_page.kind) {
+        case PAGE_MENU: return {PB_CLOSE};
+        case PAGE_YES_NO:
+        case PAGE_ACCEPT_DECLINE: return {PB_YES, PB_NO};
+        default: {
+            std::vector<int> v;
+            if (g_page.flags & PAGE_PREV) v.push_back(PB_PREV);
+            v.push_back(PB_NEXT);
+            return v;
+        }
+        }
+    }
+
+    const wchar_t* PageButtonLabel(int pb) const {
+        bool accept = g_page.kind == PAGE_ACCEPT_DECLINE;
+        switch (pb) {
+        case PB_CLOSE: return L"Close";
+        case PB_YES: return accept ? L"Accept" : L"Yes";
+        case PB_NO: return accept ? L"Decline" : L"No";
+        case PB_PREV: return L"Prev";
+        case PB_NEXT: return (g_page.flags & PAGE_NEXT) ? L"Next" : L"OK";
+        default: return L"";
+        }
+    }
+
+    RECT PageButtonRect(int pb) const {
+        std::vector<int> buttons = PageButtons();
+        int count = static_cast<int>(buttons.size());
+        int index = 0;
+        for (int k = 0; k < count; ++k) {
+            if (buttons[static_cast<size_t>(k)] == pb) index = k;
+        }
+        int gap = 8;
+        int total = count * kPageBtnW + (count - 1) * gap;
+        int x = (kWndW - total) / 2 + index * (kPageBtnW + gap);
+        int y = BtnRow1() + (BtnRow2() - BtnRow1()) / 2;
+        return {x, y, x + kPageBtnW, y + kBtnH};
+    }
+
+    int PageButtonAt(int x, int y) const {
+        POINT pt{x, y};
+        for (int pb : PageButtons()) {
+            RECT rc = PageButtonRect(pb);
+            if (PtInRect(&rc, pt)) return pb;
+        }
+        return BT_NONE;
+    }
+
+    bool PageWaiting() {
+        if (m_bPageWaiting && GetTickCount() - m_dwPageSent > kPageReplyWaitMs) m_bPageWaiting = false;
+        return m_bPageWaiting;
+    }
+
+    void Reply(unsigned char action, int selection) {
+        if (PageWaiting()) return;
+        if (g_bSelfTest && !g_bEnabled) {
+            SampleReply(action, selection);
+            return;
+        }
+        SendPageReply(g_page.stamp, action, selection);
+        m_bPageWaiting = true;
+        m_dwPageSent = GetTickCount();
+        InvalidateRect(nullptr);
+    }
+
+    void PressPageButton(int pb) {
+        switch (pb) {
+        case PB_CLOSE: Reply(kReplyClose, -1); break;
+        case PB_YES: Reply(kReplyYes, -1); break;
+        case PB_NO: Reply(kReplyNo, -1); break;
+        case PB_PREV: Reply(kReplyNo, -1); break;
+        case PB_NEXT: Reply(kReplyYes, -1); break;
+        default: break;
+        }
+    }
+
+    void DrawPageButton(IWzCanvasPtr& c, int pb) {
+        RECT rc = PageButtonRect(pb);
+        bool on = !m_bPageWaiting;
+        unsigned int fill = !on ? 0xFFD8D8D8 : m_nPressedBtn == pb ? 0xFFB9CBE3 : m_nHoverBtn == pb ? 0xFFFFFFFF : 0xFFE6EDF6;
+        Fill(c, rc.left, rc.top, kPageBtnW, kBtnH, 0xFF7D90AA);
+        Fill(c, rc.left + 1, rc.top + 1, kPageBtnW - 2, kBtnH - 2, fill);
+        IWzFontPtr& f = on ? m_pFont : m_pFontLight;
+        std::wstring label = PageButtonLabel(pb);
+        Text(c, f, rc.left + (kPageBtnW - TextW(f, label)) / 2, rc.top + 3, label);
+    }
+
+    void DrawPage(IWzCanvasPtr& c) {
+        if (m_bLayoutDirty) Layout();
+        PageWaiting();
+        int top = PageTop();
+        int bottom = PanelBottom();
+        int oy = top - m_nPageScroll;
+        for (size_t b = 0; b < m_boxes.size(); ++b) {
+            int y0 = oy + m_boxes[b].top;
+            int y1 = oy + m_boxes[b].bottom;
+            if (y1 <= top || y0 >= bottom) continue;
+            int t = (std::max)(y0, top);
+            int h = (std::min)(y1, bottom) - t;
+            if (!m_bPageWaiting && static_cast<int>(b) == m_nPressedOption) {
+                Fill(c, kLeft - 3, t, kPageW + 6, h, 0xFFC9DCF5);
+            } else if (!m_bPageWaiting && static_cast<int>(b) == m_nHoverOption) {
+                Fill(c, kLeft - 3, t, kPageW + 6, h, 0xFFEEF3FA);
+            }
+            if (y0 + 8 >= top && y0 + 11 <= bottom) Fill(c, kLeft + 2, y0 + 8, 3, 3, 0xFF7D90AA);
+        }
+        for (const Run& r : m_runs) {
+            int y = oy + r.y;
+            if (y < top || y + kLineH - 2 > bottom) continue;
+            Text(c, InkFont(r.ink, r.bold), kLeft + r.x, y, r.text);
+        }
+        if (m_nPageScroll > 0) Text(c, m_pFontGrey, kRight - 8, top - 14, L"\x25B2");
+        if (m_nPageScroll + PageVisibleH() < m_nPageH) Text(c, m_pFontGrey, kRight - 8, bottom - 2, L"\x25BC");
+        for (int pb : PageButtons()) {
+            DrawPageButton(c, pb);
+        }
+    }
+
+    // ---- self-test pages (crew_selftest=1 and no server): the page view without a server ----
+
+    static Page SamplePage(int which) {
+        Page pg;
+        pg.valid = true;
+        pg.stamp = which + 1;
+        auto option = [&](int selection, const wchar_t* label) { pg.entries.push_back({true, selection, label}); };
+        auto heading = [&](const wchar_t* label) { pg.entries.push_back({false, 0, label}); };
+        switch (which) {
+        case 0:
+            pg.kind = PAGE_MENU;
+            pg.text = L"#eThe crew#n\r\n";
+            option(1, L"Call my usual lineup");
+            option(2, L"Remember this lineup");
+            option(3, L"Everyone: follow me");
+            option(3, L"Everyone: wait here");
+            option(4, L"Formation...");
+            option(5, L"Everyone on the bench...");
+            option(5, L"Keep my crew fresh (off)");
+            option(6, L"Make room for a friend...");
+            option(7, L"Adventurers looking for a crew...");
+            option(8, L"My lineups...");
+            option(9, L"More...");
+            break;
+        case 1:
+            pg.kind = PAGE_MENU;
+            pg.text = L"The lineups I keep:\r\n#eHunting#n: Halvard, Casse, Kestrel\r\n#ePQ#n: (none yet)\r\n"
+                      L"#eBoss#n: Halvard, Casse, Kestrel, Lioren, IceCookie, Pell and a #bvery long#k name list "
+                      L"that has to wrap onto the next line\r\n";
+            option(1, L"Call the Hunting lineup");
+            option(1, L"Call the Boss lineup");
+            heading(L"\r\nOr keep this crew:");
+            option(1, L"Remember this crew as Hunting");
+            option(1, L"Remember this crew as PQ");
+            option(1, L"Remember this crew as Boss");
+            option(0, L"Back");
+            break;
+        case 2:
+            pg.kind = PAGE_YES_NO;
+            pg.text = L"#eHalvard#n signed on for #r4 more hours#k. Benched now, he won't sit at camp for long. "
+                      L"Make room anyway?";
+            break;
+        default:
+            pg.kind = PAGE_OK;
+            pg.flags = PAGE_PREV;
+            pg.text = L"#bRemembered#k: Halvard, Casse and Kestrel are your #eHunting#n lineup.";
+            break;
+        }
+        return pg;
+    }
+
+    void ShowSamplePage(int which) {
+        OnPage(SamplePage(which));
+    }
+
+    void SampleReply(unsigned char action, int selection) {
+        if (action == kReplyClose) {
+            OnPageClose(0);
+            return;
+        }
+        if (g_page.kind == PAGE_MENU) {
+            if (selection == 0) ShowSamplePage(0);
+            else if (selection == 8) ShowSamplePage(1);
+            else if (selection == 6) ShowSamplePage(2);
+            else ShowSamplePage(3);
+            return;
+        }
+        if (g_page.kind == PAGE_OK && action == kReplyNo) {
+            ShowSamplePage(1);
+            return;
+        }
+        OnPageClose(0);
+    }
+
     void Close(bool bTellServer) {
         if (m_bClosing) return;
         m_bClosing = true;
+        g_page = Page(); // CLOSE ends the server's page too
         if (bTellServer && g_bEnabled) SendSimple(OP_CLOSE);
         play_ui_sound(L"MenuDown");
         Destroy();
@@ -453,6 +818,10 @@ public:
             }
         }
 
+        if (g_page.valid) { // a page covers the crew until it closes; snapshots keep arriving underneath
+            DrawPage(c);
+            return;
+        }
         if (!g_snap.valid) {
             Text(c, m_pFontGrey, kLeft, kPartyTop, L"Asking your crew...");
         } else {
@@ -556,10 +925,56 @@ public:
         play_ui_sound(L"DragEnd");
     }
 
+    // A page takes the clicks: its options and buttons, and the title bar's close button.
+    void PageMouseButton(unsigned int msg, int rx, int ry) {
+        if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK) {
+            POINT pt{rx, ry};
+            RECT rcClose = ButtonRect(BT_CLOSE);
+            int pb = PtInRect(&rcClose, pt) ? BT_CLOSE : PageButtonAt(rx, ry);
+            if (pb != BT_NONE && (pb == BT_CLOSE || !PageWaiting())) {
+                m_nPressedBtn = pb;
+                play_ui_sound(L"BtMouseClick");
+                InvalidateRect(nullptr);
+                return;
+            }
+            int option = PageWaiting() ? -1 : OptionAt(rx, ry);
+            if (option >= 0) {
+                m_nPressedOption = option;
+                InvalidateRect(nullptr);
+            }
+            return;
+        }
+        if (msg != WM_LBUTTONUP) return;
+        int pressedBtn = m_nPressedBtn;
+        int pressedOption = m_nPressedOption;
+        m_nPressedBtn = BT_NONE;
+        m_nPressedOption = -1;
+        InvalidateRect(nullptr);
+        if (pressedBtn == BT_CLOSE) {
+            POINT pt{rx, ry};
+            RECT rcClose = ButtonRect(BT_CLOSE);
+            if (PtInRect(&rcClose, pt)) Close(true);
+            return;
+        }
+        if (pressedBtn != BT_NONE && PageButtonAt(rx, ry) == pressedBtn) {
+            PressPageButton(pressedBtn);
+            return;
+        }
+        if (pressedOption >= 0 && OptionAt(rx, ry) == pressedOption) {
+            const PageEntry& e = g_page.entries[m_boxes[static_cast<size_t>(pressedOption)].entry];
+            play_ui_sound(L"BtMouseClick");
+            Reply(kReplyYes, e.selection);
+        }
+    }
+
     virtual void OnMouseButton(unsigned int msg, unsigned int wParam, int rx, int ry) override {
         if (this != ms_pInstance || m_bClosing) return;
         m_nMouseX = rx;
         m_nMouseY = ry;
+        if (g_page.valid) {
+            PageMouseButton(msg, rx, ry);
+            return;
+        }
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK) {
             int bt = ButtonAt(rx, ry);
             if (bt != BT_NONE) {
@@ -616,6 +1031,20 @@ public:
         if (this != ms_pInstance || m_bClosing) return 0;
         m_nMouseX = rx;
         m_nMouseY = ry;
+        if (g_page.valid) {
+            POINT pt{rx, ry};
+            RECT rcClose = ButtonRect(BT_CLOSE);
+            bool waiting = PageWaiting();
+            int pb = PtInRect(&rcClose, pt) ? BT_CLOSE : waiting ? BT_NONE : PageButtonAt(rx, ry);
+            int option = waiting ? -1 : OptionAt(rx, ry);
+            if (pb != m_nHoverBtn || option != m_nHoverOption) {
+                if (pb != BT_NONE && pb != m_nHoverBtn) play_ui_sound(L"BtMouseOver");
+                m_nHoverBtn = pb;
+                m_nHoverOption = option;
+                InvalidateRect(nullptr);
+            }
+            return 0;
+        }
         if (!m_dragId.empty() && !m_bDragging && (abs(rx - m_nDownX) > 4 || abs(ry - m_nDownY) > 4)) {
             m_bDragging = true;
             play_ui_sound(L"DragStart");
@@ -635,6 +1064,13 @@ public:
 
     virtual int OnMouseWheel(int rx, int ry, int nWheel) override {
         if (this != ms_pInstance) return 0;
+        if (g_page.valid) {
+            m_nPageScroll += nWheel > 0 ? -kLineH * 2 : kLineH * 2;
+            ClampPageScroll();
+            m_nHoverOption = OptionAt(rx, ry);
+            InvalidateRect(nullptr);
+            return 1;
+        }
         if (InBenchBlock(ry)) {
             m_nBenchScroll += nWheel > 0 ? -1 : 1;
             ClampScroll();
@@ -645,9 +1081,10 @@ public:
 
     virtual void OnMouseEnter(int bEnter) override {
         CWnd::OnMouseEnter(bEnter);
-        if (!bEnter && (m_nHoverBtn != BT_NONE || !m_hoverRow.empty())) {
+        if (!bEnter && (m_nHoverBtn != BT_NONE || !m_hoverRow.empty() || m_nHoverOption >= 0)) {
             m_nHoverBtn = BT_NONE;
             m_hoverRow.clear();
+            m_nHoverOption = -1;
             InvalidateRect(nullptr);
         }
     }
@@ -700,6 +1137,7 @@ Snapshot SampleSnapshot() {
 
 void OpenWindow() {
     if (CCrewWnd::ms_pInstance) return;
+    g_page = Page();
     if (g_bSelfTest && !g_bEnabled) {
         g_snap = SampleSnapshot();
         new CCrewWnd();
@@ -728,7 +1166,9 @@ void OnCrewPacket(const unsigned char* p, size_t n) {
         int protocol = r.u16();
         int enabled = r.u8();
         if (!r.ok) return;
-        g_bEnabled = protocol == kProtocol && enabled != 0;
+        // the server answers the lower of its protocol and ours: 1 (More opens the NPC Crew window) or 2 (pages)
+        g_nProtocol = protocol >= 1 && protocol <= kProtocol ? protocol : 0;
+        g_bEnabled = g_nProtocol != 0 && enabled != 0;
         crew_log("WELCOME protocol %d enabled %d", protocol, enabled);
         if (!g_bEnabled) {
             CloseWindow(false);
@@ -754,6 +1194,29 @@ void OnCrewPacket(const unsigned char* p, size_t n) {
     case SV_OPEN:
         OpenWindow();
         break;
+    case SV_PAGE: {
+        Page page;
+        if (g_nProtocol < 2 || !ReadPage(r, page)) {
+            crew_log("bad PAGE (%u bytes)", static_cast<unsigned int>(n));
+            return;
+        }
+        if (!CCrewWnd::ms_pInstance) {
+            SendPageReply(page.stamp, kReplyClose, -1); // the window closed meanwhile: end the page, as End Chat does
+            return;
+        }
+        CCrewWnd::ms_pInstance->OnPage(std::move(page));
+        break;
+    }
+    case SV_PAGE_CLOSE: {
+        int stamp = r.i32();
+        if (!r.ok) return;
+        if (CCrewWnd::ms_pInstance) {
+            CCrewWnd::ms_pInstance->OnPageClose(stamp);
+        } else if (g_page.valid && (stamp == 0 || stamp == g_page.stamp)) {
+            g_page = Page();
+        }
+        break;
+    }
     default:
         break;
     }
@@ -861,7 +1324,9 @@ auto CWvsContext__ClearFieldUI = reinterpret_cast<void(__thiscall*)(void*)>(kCle
 void __fastcall CWvsContext__OnLeaveGame_hook(void* pThis, void* /*edx*/) {
     CloseWindow(false);
     g_bEnabled = false;
+    g_nProtocol = 0;
     g_snap = Snapshot();
+    g_page = Page();
     CWvsContext__OnLeaveGame(pThis);
 }
 
@@ -895,6 +1360,9 @@ UINT ReadHotkey(const std::string& config) {
 void CrewWindowOnConnect() {
     g_bHelloSent = false;
     g_bEnabled = false;
+    g_nProtocol = 0;
+    g_page = Page(); // the new connection's server has no page open
+    if (CCrewWnd::ms_pInstance) CCrewWnd::ms_pInstance->InvalidateRect(nullptr);
 }
 
 void AttachCrewWindowMod() {

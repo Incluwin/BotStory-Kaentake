@@ -107,7 +107,7 @@ namespace crew {
 constexpr unsigned short kRecvOpcode     = 0x17A;       // server -> client (server SendOpcode.CREW_WINDOW)
 constexpr unsigned short kSendOpcode     = 0x117;       // client -> server (server RecvOpcode.CREW_WINDOW)
 constexpr unsigned short kSetFieldOpcode = 0x7D;        // SET_FIELD: HELLO follows the first one of a connection
-constexpr int kProtocol = 1;
+constexpr int kProtocol = 2;                  // HELLO; WELCOME answers 1 or 2 (pages need 2)
 constexpr int kDllBuild = 20261012;
 constexpr uintptr_t kProcessPacket        = 0x004965F1; // CClientSocket::ProcessPacket(CInPacket&), from ManipulatePacket 0x004965C4
 constexpr uintptr_t kSendPacket           = 0x0049637B; // CClientSocket::SendPacket(const COutPacket&)
@@ -128,6 +128,12 @@ constexpr int kFontBlack = 1;      // 12px 0xFF000000
 constexpr int kFontDarkGrey = 2;   // 12px 0xFF404040
 constexpr int kFontLightGrey = 17; // 12px 0xFFBBBBBB
 constexpr int kFontBlackBold = 29; // 12px 0xFF000000, style SP 0x583
+constexpr int kFontBlue = 4;       // 12px 0xFF2000FF (NPC #b)
+constexpr int kFontRed = 6;        // 12px 0xFFFF2020 (NPC #r)
+constexpr int kFontPurple = 12;    // 12px 0xFFCC0066 (NPC #d)
+constexpr int kFontGreen = 13;     // 12px 0xFF336600 (NPC #g)
+constexpr int kFontBlueBold = 32;  // 12px 0xFF2000FF, style SP 0x584
+constexpr int kFontRedBold = 33;   // 12px 0xFFFF2020, style SP 0x584
 }  // namespace crew
 
 }  // namespace v83
