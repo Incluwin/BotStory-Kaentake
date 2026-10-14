@@ -48,6 +48,7 @@ void AttachClientBypass();
 void AttachClientInlink();
 void AttachStringPoolMod();
 void AttachResManMod();
+void AttachWzMapLimit(); // called in resman.cpp -> CWvsApp::InitializeResMan_hook
 void AttachAvatarDataMod();
 void AttachItemEffectMod();
 void AttachResolutionMod();

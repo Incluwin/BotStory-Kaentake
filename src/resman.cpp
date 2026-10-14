@@ -182,6 +182,7 @@ public:
 
 void CWvsApp::InitializeResMan_hook() {
     DEBUG_MESSAGE("CWvsApp::InitializeResMan");
+    AttachWzMapLimit(); // before the original opens the archives
     CWvsApp::InitializeResMan(this);
 
     // add custom namespace to root

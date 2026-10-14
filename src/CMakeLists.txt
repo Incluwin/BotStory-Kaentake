@@ -5,6 +5,7 @@ add_library(injector SHARED
     bypass.cpp
     inlink.cpp
     resman.cpp
+    wzmaplimit.cpp
     avatar.cpp
     itemeff.cpp
     resolution.cpp
