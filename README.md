@@ -58,6 +58,14 @@ resolution=1600x900
 - `patch_url` — optional. If unset, the patcher is skipped entirely and the
   launcher behaves like stock upstream. If set, the patcher fetches
   `<patch_url>/manifest.txt` on every launch.
+- `base` — optional, the WZ set the client is built on. Leave it out (or
+  `repack`) for the Community Repack set. `base=cosmic` marks a client built
+  on the clean Cosmic WZ set (patched with the server repo's
+  `tools/wz-patcher`): the patcher also fetches
+  `<patch_url>/bases/cosmic/manifest.txt`, whose entries replace the main
+  manifest's WZ files and download from `<patch_url>/bases/cosmic/`. If the
+  server has no such manifest the launcher asks before playing with the
+  current files; it never falls back to the Repack WZ files.
 - `resolution` — optional preferred launch resolution. Accepts either a
   `WxH` shorthand (`800x600`, `1024x768`, `1366x768`, `1600x900`,
   `1920x1080`) or a direct index (`0`–`4`). When set, it overrides the

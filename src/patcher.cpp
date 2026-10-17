@@ -30,6 +30,7 @@ struct ManifestEntry {
     uint64_t    size   = 0;
     std::string sha256;
     std::string path;
+    std::string source;   // server folder the file downloads from ("" = patch_url itself)
 };
 
 // Local side-cache so we don't re-SHA256 files that haven't been touched
@@ -111,6 +112,28 @@ bool ReadPatchUrlFromConfig(std::string& out) {
     while (n > 0 && (buf[n-1] == '/' || buf[n-1] == '\\')) buf[--n] = '\0';
     out.assign(buf, n);
     return !out.empty();
+}
+
+// [config] base=<name> names the WZ set this client is built on. Unset or
+// "repack" is the Community Repack set the main manifest describes. Any other
+// name also applies the patch server's bases/<name>/manifest.txt (see
+// ApplyOverlay), so a client built on the clean Cosmic WZ set keeps its own WZ
+// files. Returns false if the value is not a plain name.
+bool ReadBaseFromConfig(std::string& out) {
+    char buf[64];
+    DWORD n = GetPrivateProfileStringA(
+        "config", "base", "",
+        buf, sizeof(buf), ".\\" CONSTANTS_CONFIG_NAME);
+    out.clear();
+    for (DWORD i = 0; i < n; ++i) {
+        char c = buf[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+        if (!ok) return false;
+        out.push_back(c);
+    }
+    if (out == "repack") out.clear();
+    return true;
 }
 
 // --- url parsing ---
@@ -435,6 +458,24 @@ bool ParseManifest(const std::vector<uint8_t>& body, std::vector<ManifestEntry>&
     return true;
 }
 
+// A base's overlay entry replaces the main entry with the same path (Windows
+// paths, so case-insensitive) or adds the file, and downloads from `source`.
+void ApplyOverlay(std::vector<ManifestEntry>& entries,
+                  std::vector<ManifestEntry>& overlay, const std::string& source) {
+    for (auto& o : overlay) {
+        o.source = source;
+        bool replaced = false;
+        for (auto& e : entries) {
+            if (_stricmp(e.path.c_str(), o.path.c_str()) == 0) {
+                e = o;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) entries.push_back(o);
+    }
+}
+
 // --- local file ops ---
 
 bool FileStat(const std::string& path, uint64_t& size, uint64_t& mtime) {
@@ -587,7 +628,7 @@ bool ProcessEntry(const ParsedUrl& base, const ManifestEntry& e,
 
     Log("updating %s (%.1f MiB)", e.path.c_str(), e.size / (1024.0 * 1024.0));
 
-    std::wstring url_path = JoinPath(base.path, UrlEncodePath(e.path));
+    std::wstring url_path = JoinPath(base.path, UrlEncodePath(e.source + e.path));
     EnsureDirForFile(local);
 
     for (int attempt = 1; attempt <= 2; ++attempt) {
@@ -649,6 +690,12 @@ bool PatcherRun() {
         return false;
     }
 
+    std::string wz_base;
+    if (!ReadBaseFromConfig(wz_base)) {
+        ErrorMessage("Invalid base in config.ini (letters, digits, - and _ only).");
+        return false;
+    }
+
     // Deliberately silent on the happy-path fast case: when every file is
     // cache-valid and matches the manifest, we never open a console at all.
     // EnsureConsole() is called lazily via Log() only when we hit real work
@@ -676,6 +723,28 @@ bool PatcherRun() {
             "Play with your current files?");
         DetachConsole();
         return cont;
+    }
+
+    if (!wz_base.empty()) {
+        std::string source = "bases/" + wz_base + "/";
+        std::vector<uint8_t> overlay_body;
+        std::vector<ManifestEntry> overlay;
+        if (!HttpGetBytes(base, JoinPath(base.path, Widen(source + "manifest.txt")),
+                          overlay_body, MANIFEST_TIMEOUT_MS)
+                || !ParseManifest(overlay_body, overlay) || overlay.empty()) {
+            // Never patch with the main manifest alone: it would replace this
+            // client's WZ files with the Community Repack set.
+            Log("patch server has no manifest for base=%s", wz_base.c_str());
+            char msg[512];
+            StringCbPrintfA(msg, sizeof(msg),
+                "The patch server has no files for this client's WZ set "
+                "(config.ini base=%s).\n\n"
+                "Play with your current files?", wz_base.c_str());
+            bool cont = AskContinue("BotStory", msg);
+            DetachConsole();
+            return cont;
+        }
+        ApplyOverlay(entries, overlay, source);
     }
 
     CacheMap cache;
