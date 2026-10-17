@@ -68,6 +68,7 @@ public:
 void CClientSocket::Connect_hook(const CONNECTCONTEXT& ctx) {
     DEBUG_MESSAGE("CClientSocket::Connect");
     CrewWindowOnConnect(); // a new connection says HELLO again
+    FeatureHandshakeOnConnect(); // and reports its feature list again
     m_ctxConnect.lAddr.RemoveAll();
     m_ctxConnect.lAddr.AddTail(ctx.lAddr);
     m_ctxConnect.posList = ctx.posList;

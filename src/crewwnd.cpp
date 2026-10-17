@@ -8,6 +8,7 @@
 #include "wvs/util.h"
 #include "ztl/ztl.h"
 #include "crewproto.h"
+#include "serverpackets.h"
 #include <cstdarg>
 #include <cstdio>
 
@@ -20,8 +21,8 @@
 // server or a switched-off one leaves the client exactly as before.
 //
 // Hooks (addresses from an unpacked dump of the shipped v83 build, see v83_offsets.h):
-//   CClientSocket::ProcessPacket  0x17A is parsed here and never reaches the game; HELLO follows the first SET_FIELD
-//                                 of each connection.
+//   CClientSocket::ProcessPacket  (serverpackets.cpp's, shared) 0x17A is parsed here and never reaches the game;
+//                                 HELLO follows the first SET_FIELD of each connection.
 //   CWndMan::ProcessKey           the hotkey, only while no edit box has the focus (so never while chatting) and only
 //                                 when the key is unbound in the player's key map.
 //   CWvsContext::OnLeaveGame      the window closes; WELCOME is forgotten.
@@ -1232,48 +1233,13 @@ bool GuardedCrewPacket(const unsigned char* p, size_t n) {
     }
 }
 
-// CInPacket as the client lays it out (CInPacket::Decode2 at 0x0042470C reads these fields).
-struct InPacketView {
-    int bLoopback;
-    int nState;
-    unsigned char* aRecvBuff;
-    unsigned short uLength;
-    unsigned short uRawSeq;
-    unsigned short uDataLen;
-    unsigned short uPad;
-    unsigned int uOffset;
-};
-static_assert(offsetof(InPacketView, aRecvBuff) == 0x8);
-static_assert(offsetof(InPacketView, uLength) == 0xC);
-static_assert(offsetof(InPacketView, uOffset) == 0x14);
-
-bool PeekOpcode(void* pPacket, unsigned short* pOp, const unsigned char** ppBody, size_t* pBodyLen) {
-    __try {
-        auto* v = static_cast<InPacketView*>(pPacket);
-        if (!v || !v->aRecvBuff || v->uOffset + 2 > v->uLength) return false;
-        const unsigned char* data = v->aRecvBuff + v->uOffset;
-        *pOp = static_cast<unsigned short>(data[0] | (data[1] << 8));
-        *ppBody = data + 2;
-        *pBodyLen = static_cast<size_t>(v->uLength - v->uOffset - 2);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+// server_packets hands over 0x17A and each SET_FIELD (serverpackets.cpp owns the ProcessPacket hook).
+void OnCrewRecv(const unsigned char* p, size_t n) {
+    if (!GuardedCrewPacket(p, n)) crew_log("exception while reading a crew packet");
 }
 
-auto CClientSocket__ProcessPacket = reinterpret_cast<void(__thiscall*)(void*, void*)>(kProcessPacket);
-
-void __fastcall CClientSocket__ProcessPacket_hook(void* pThis, void* /*edx*/, void* pPacket) {
-    unsigned short op = 0;
-    const unsigned char* body = nullptr;
-    size_t len = 0;
-    bool peeked = PeekOpcode(pPacket, &op, &body, &len);
-    if (peeked && op == kRecvOpcode) {
-        if (!GuardedCrewPacket(body, len)) crew_log("exception while reading a crew packet");
-        return; // never the game's: an unknown opcode is its stage's to ignore, and ours is fully read here
-    }
-    CClientSocket__ProcessPacket(pThis, pPacket);
-    if (peeked && op == kSetFieldOpcode && !g_bHelloSent) {
+void OnCrewSetField() {
+    if (!g_bHelloSent) {
         g_bHelloSent = true;
         SendHello();
     }
@@ -1374,7 +1340,8 @@ void AttachCrewWindowMod() {
     }
     g_uHotkeyVk = ReadHotkey(config);
     g_bSelfTest = GetPrivateProfileIntA("config", "crew_selftest", 0, config.c_str()) != 0;
-    ATTACH_HOOK(CClientSocket__ProcessPacket, CClientSocket__ProcessPacket_hook);
+    serverpackets::OnRecv(kRecvOpcode, OnCrewRecv);
+    serverpackets::OnSetField(OnCrewSetField);
     ATTACH_HOOK(CWndMan__ProcessKey, CWndMan__ProcessKey_hook);
     ATTACH_HOOK(CWvsContext__OnLeaveGame, CWvsContext__OnLeaveGame_hook);
     ATTACH_HOOK(CWvsContext__ClearFieldUI, CWvsContext__ClearFieldUI_hook);

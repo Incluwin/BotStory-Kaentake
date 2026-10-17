@@ -70,8 +70,11 @@ void AttachGetBodyPartFromItemFix();
 void AttachExtChainLightning();
 void AttachMapInfoToolTip();
 void AttachQuestListColorMod();
+void AttachServerPackets(); // serverpackets.cpp: the BotStory server's packets, then AttachFeatureHandshake
 void AttachCrewWindowMod();
 void CrewWindowOnConnect();
+void AttachFeatureHandshake();
+void FeatureHandshakeOnConnect();
 
 
 template <typename T>

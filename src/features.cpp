@@ -5,7 +5,8 @@
 //   <id>=1|0    one line per module; a missing line = the module's default (feature_list.h)
 //   log=1       write kaentake_features.txt: the attach order and every hook and patch, rewritten each start
 //               (also when the environment has KAENTAKE_FEATURE_LOG=1)
-//   inert=a,b   attach these LIVE modules but start them inert, as a server veto at login would leave them
+//   inert=a,b   server vetoes kept for this start (the feature handshake writes them): a LIVE module here attaches
+//               but starts inert, any other one does not attach
 #include "pch.h"
 #include "features.h"
 #include "hook.h"
@@ -30,11 +31,13 @@ struct Feature {
     bool bDefault;
     int nFlags;
     FeatureId eRequires;
+    int nVersion;
     void (*pAttach)();
 };
 
 const Feature kFeatures[] = {
-#define FEATURE_ROW(id, title, def, flags, req, attach) { #id, title, (def) != 0, (flags), FeatureId::req, &attach },
+#define FEATURE_ROW(id, title, def, flags, req, version, attach) \
+    { #id, title, (def) != 0, (flags), FeatureId::req, (version), &attach },
     KAENTAKE_FEATURES(FEATURE_ROW)
 #undef FEATURE_ROW
 };
@@ -47,8 +50,9 @@ constexpr bool SameText(const char* a, const char* b) {
 }
 
 // Build-time checks on the list (a duplicate id already fails as a duplicate enumerator).
-#define FEATURE_CHECK(id, title, def, flags, req, attach) \
+#define FEATURE_CHECK(id, title, def, flags, req, version, attach) \
     static_assert(FeatureId::req < FeatureId::id, #id ": the module it requires must come earlier in the list"); \
+    static_assert((version) >= 1 && (version) <= 0xFFFF, #id ": the version is 1..65535 (the handshake sends a short)"); \
     static_assert(!((flags) & FEATURE_CORE) || (def), #id ": a core module is always on"); \
     static_assert(!((flags) & FEATURE_CORE) || !((flags) & (FEATURE_LIVE | FEATURE_SERVER_GATED)), \
                   #id ": a core module has no switch"); \
@@ -179,6 +183,29 @@ void AttachOne(size_t i) {
     g_aState[i].bAttached = true;
 }
 
+// config.ini [features] inert=, one entry per id as written there.
+std::vector<std::string> ReadInertList(const std::string& config) {
+    char buf[512];
+    std::vector<std::string> ids;
+    if (GetPrivateProfileStringA("features", "inert", "", buf, sizeof(buf), config.c_str()) == 0) {
+        return ids;
+    }
+    char* pContext = nullptr;
+    for (char* sId = strtok_s(buf, ", \t", &pContext); sId; sId = strtok_s(nullptr, ", \t", &pContext)) {
+        ids.emplace_back(sId);
+    }
+    return ids;
+}
+
+bool InInertList(const std::string& config, const char* sId) {
+    for (const auto& s : ReadInertList(config)) {
+        if (_stricmp(s.c_str(), sId) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Whether config.ini and the module's requirement let a module attach.
 bool MayAttach(size_t i, const std::string& config) {
     const Feature& f = kFeatures[i];
@@ -192,6 +219,11 @@ bool MayAttach(size_t i, const std::string& config) {
     }
     if (f.eRequires != FeatureId::none && !g_aState[static_cast<size_t>(f.eRequires)].bAttached) {
         Diag("%s off: it needs %s", f.id, kFeatures[static_cast<size_t>(f.eRequires)].id);
+        return false;
+    }
+    // a module that cannot go inert while the game runs keeps a server veto by not attaching at all
+    if (!(f.nFlags & (FEATURE_CORE | FEATURE_LIVE)) && InInertList(config, f.id)) {
+        Diag("%s off: a server veto kept from an earlier login (config.ini inert=)", f.id);
         return false;
     }
     return true;
@@ -234,17 +266,12 @@ void CheckSharedBytes(size_t uFrom) {
 }
 
 void ApplyInertList(const std::string& config) {
-    char buf[512];
-    if (GetPrivateProfileStringA("features", "inert", "", buf, sizeof(buf), config.c_str()) == 0) {
-        return;
-    }
-    char* pContext = nullptr;
-    for (char* sId = strtok_s(buf, ", \t", &pContext); sId; sId = strtok_s(nullptr, ", \t", &pContext)) {
-        FeatureId id = features::Find(sId);
+    for (const auto& s : ReadInertList(config)) {
+        FeatureId id = features::Find(s.c_str());
         if (id == FeatureId::none) {
-            Diag("inert=%s: no such module", sId);
+            Diag("inert=%s: no such module", s.c_str());
         } else if (features::SetActive(id, false)) {
-            Diag("%s attached inert (config.ini inert=)", sId);
+            Diag("%s attached inert (config.ini inert=)", s.c_str());
         }
     }
 }
@@ -355,6 +382,57 @@ bool SetActive(FeatureId id, bool bActive) {
 const char* Name(FeatureId id) {
     size_t i = static_cast<size_t>(id);
     return i < kCount ? kFeatures[i].id : "none";
+}
+
+const char* Title(FeatureId id) {
+    size_t i = static_cast<size_t>(id);
+    return i < kCount ? kFeatures[i].title : "";
+}
+
+int Version(FeatureId id) {
+    size_t i = static_cast<size_t>(id);
+    return i < kCount ? kFeatures[i].nVersion : 0;
+}
+
+int Flags(FeatureId id) {
+    size_t i = static_cast<size_t>(id);
+    return i < kCount ? kFeatures[i].nFlags : 0;
+}
+
+bool IsVetoed(FeatureId id) {
+    size_t i = static_cast<size_t>(id);
+    return i < kCount && InInertList(ConfigPath(), kFeatures[i].id);
+}
+
+bool SetVetoed(FeatureId id, bool bVetoed) {
+    size_t i = static_cast<size_t>(id);
+    if (i >= kCount || (kFeatures[i].nFlags & FEATURE_CORE)) {
+        return false;
+    }
+    std::string config = ConfigPath();
+    std::vector<std::string> ids = ReadInertList(config);
+    bool bListed = false;
+    std::string joined;
+    for (const auto& s : ids) {
+        if (_stricmp(s.c_str(), kFeatures[i].id) == 0) {
+            bListed = true;
+            if (!bVetoed) {
+                continue;
+            }
+        }
+        joined += (joined.empty() ? "" : ",") + s;
+    }
+    if (bListed == bVetoed) {
+        return true;
+    }
+    if (bVetoed) {
+        joined += (joined.empty() ? "" : ",") + std::string(kFeatures[i].id);
+    }
+    if (!WritePrivateProfileStringA("features", "inert", joined.empty() ? nullptr : joined.c_str(), config.c_str())) {
+        return false;
+    }
+    Log("inert= %s (%s %s)", joined.c_str(), kFeatures[i].id, bVetoed ? "vetoed" : "veto lifted");
+    return true;
 }
 
 AttachScope::AttachScope(FeatureId id) : m_nOuter(g_nCurrent), m_uFrom(Records().size()) {

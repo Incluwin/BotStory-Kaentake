@@ -7,7 +7,7 @@
 
 enum class FeatureId : int {
     none = -1,
-#define FEATURE_ENUM(id, title, def, flags, req, attach) id,
+#define FEATURE_ENUM(id, title, def, flags, req, version, attach) id,
     KAENTAKE_FEATURES(FEATURE_ENUM)
 #undef FEATURE_ENUM
     count
@@ -34,7 +34,16 @@ bool IsActive(FeatureId id);
 bool SetActive(FeatureId id, bool bActive);
 
 const char* Name(FeatureId id);
+const char* Title(FeatureId id);
+int Version(FeatureId id);
+int Flags(FeatureId id);
 FeatureId Find(const char* sId); // FeatureId::none when unknown
+
+// config.ini [features] inert= names the module: a server veto kept for the next start. A LIVE module there attaches
+// inert; any other one does not attach. SetVetoed adds or removes the module (never a core one) and is false when it
+// could not; the feature handshake keeps the list.
+bool IsVetoed(FeatureId id);
+bool SetVetoed(FeatureId id, bool bVetoed);
 
 // For hooks a module installs after its attach function returned (from inside one of its own hooks): records them
 // under that module, and checks them for shared bytes when the scope ends.

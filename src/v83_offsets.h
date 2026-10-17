@@ -136,4 +136,12 @@ constexpr int kFontBlueBold = 32;  // 12px 0xFF2000FF, style SP 0x584
 constexpr int kFontRedBold = 33;   // 12px 0xFFFF2020, style SP 0x584
 }  // namespace crew
 
+// The login feature handshake (BotStory server docs/CLIENT_FEATURE_HANDSHAKE.md); the packet hooks are crew's above.
+namespace handshake {
+constexpr unsigned short kRecvOpcode = 0x17B;  // server -> client POLICY (server SendOpcode.CLIENT_FEATURES)
+constexpr unsigned short kSendOpcode = 0x118;  // client -> server REPORT / APPLIED (server RecvOpcode.CLIENT_FEATURES)
+constexpr int kProtocol = 1;
+constexpr int kDllBuild = 20261017;
+}  // namespace handshake
+
 }  // namespace v83

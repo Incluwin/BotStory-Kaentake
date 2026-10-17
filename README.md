@@ -100,23 +100,34 @@ crew_window=1
   `[config] crew_window` still works when `[features]` has no
   `crew_window` line.
 - Core modules (`version_guard`, `client_bypass`, `client_inlink`,
-  `string_pool`, `res_man`, `wz_map_limit`, `fusion_anvil_field`) always
-  attach and have no line. `fusion_anvil_field` reads the Fusion Anvil field
+  `string_pool`, `res_man`, `wz_map_limit`, `fusion_anvil_field`,
+  `server_packets`) always attach and have no line. `fusion_anvil_field` reads the Fusion Anvil field
   the BotStory server writes into every equip; only the transmog
   (`fusion_anvil`) can be switched off.
 - `requires`: `item_effect` needs `avatar_data`, `enlarge_quickslot` needs
   `resolution`. A module whose requirement is off stays off.
 - `server_gated` (`free_addy`, `ext_chain_lightning`) marks gameplay
-  changes the server may veto or require at login (planned).
+  changes: the BotStory server decides those at login (see below).
 - `log=1` (or `KAENTAKE_FEATURE_LOG=1` in the environment) writes
   `kaentake_features.txt` next to `MapleStory.exe`: the attach order and
   every hook and patch under the module that made it.
-- `inert=a,b` attaches those modules but starts them inert, the state a
-  server veto leaves them in. Only `live` modules can be inert; the others
-  need a restart to change.
+- `inert=a,b` holds the server's vetoes for the next start (the feature
+  handshake writes it): a `live` module there attaches but starts inert,
+  any other one does not attach. An allow from the server takes it out.
 
 Two modules that change the same bytes are reported in
 `kaentake_diag.txt` at startup (a message box in debug builds).
+
+**Feature handshake.** After the first SET_FIELD of each connection the
+client reports every module (id, title, `version` from `feature_list.h`,
+flags, state) on opcode 0x118; the BotStory server answers allow, deny or
+require per module on 0x17B (core module `server_packets`,
+`featurehandshake.cpp`, wire format in `src/featureproto.h`). A deny makes a
+`live` module inert at once and keeps any other one off from the next start
+(`inert=`); allow and require lift such a veto and wake an inert module. The
+player's own switches are never turned on. A server without the handshake
+never answers. Its lines go to `kaentake_diag.txt` as `[handshake]`. Server
+side: BotStory Server `docs/CLIENT_FEATURE_HANDSHAKE.md`.
 
 **Features page.** `Launch Game.exe --features`, or holding Shift while
 the launcher starts, opens a window with one checkbox per switchable

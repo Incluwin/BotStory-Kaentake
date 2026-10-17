@@ -18,7 +18,7 @@ struct Row {
 
 // The same list Kaentake.dll attaches from; the attach functions are not referenced here.
 const Row kRows[] = {
-#define LAUNCHER_ROW(id, title, def, flags, req, attach) { #id, title, (def) != 0, (flags), #req },
+#define LAUNCHER_ROW(id, title, def, flags, req, version, attach) { #id, title, (def) != 0, (flags), #req },
     KAENTAKE_FEATURES(LAUNCHER_ROW)
 #undef LAUNCHER_ROW
 };

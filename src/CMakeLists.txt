@@ -35,6 +35,8 @@ add_library(injector SHARED
     getnpcbyid.cpp
     worldmapinfo.cpp
     questcolor.cpp
+    serverpackets.cpp
+    featurehandshake.cpp
     crewwnd.cpp
 )
 
