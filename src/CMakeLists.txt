@@ -66,6 +66,7 @@ add_executable(launcher WIN32
     launcher.cpp
     debug.cpp
     patcher.cpp
+    featurespage.cpp
 )
 
 target_link_options(launcher PRIVATE "/MANIFEST:NO")

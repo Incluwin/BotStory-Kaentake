@@ -14,6 +14,10 @@ On top of the upstream hooks (resolution, quickslot, tooltip, etc.) it adds:
   end-to-end flow.
 - **Version guard.** `v83_version_guard.cpp` bails at DLL attach if the
   host `MapleStory.exe` isn't the v83 build the offsets were written for.
+- **Feature switches.** Every module is one line in `src/feature_list.h`
+  (id, title, default, flags, requirement, attach function). The DLL
+  attaches them in that order and the launcher's Features page lists them;
+  see Features below.
 
 The patcher code lives in `src/patcher.{h,cpp}` and is wired into
 `src/launcher.cpp` ahead of `DetourCreateProcessWithDllExA`. It links
@@ -76,3 +80,52 @@ resolution=1600x900
   are mirrored to `config.ini` on clean exit, so the file always reflects
   the latest choice. Leave the line out entirely to hand resolution
   control exclusively to the in-game menu.
+
+---
+
+### Features
+
+Each module in `src/feature_list.h` has a `config.ini` line under
+`[features]`:
+
+```
+[features]
+mob_hp_tag=1
+boss_hp=0
+crew_window=1
+```
+
+- A missing line is the module's default, so a `config.ini` with no
+  `[features]` section attaches the same modules as before the registry.
+  `[config] crew_window` still works when `[features]` has no
+  `crew_window` line.
+- Core modules (`version_guard`, `client_bypass`, `client_inlink`,
+  `string_pool`, `res_man`, `wz_map_limit`, `fusion_anvil_field`) always
+  attach and have no line. `fusion_anvil_field` reads the Fusion Anvil field
+  the BotStory server writes into every equip; only the transmog
+  (`fusion_anvil`) can be switched off.
+- `requires`: `item_effect` needs `avatar_data`, `enlarge_quickslot` needs
+  `resolution`. A module whose requirement is off stays off.
+- `server_gated` (`free_addy`, `ext_chain_lightning`) marks gameplay
+  changes the server may veto or require at login (planned).
+- `log=1` (or `KAENTAKE_FEATURE_LOG=1` in the environment) writes
+  `kaentake_features.txt` next to `MapleStory.exe`: the attach order and
+  every hook and patch under the module that made it.
+- `inert=a,b` attaches those modules but starts them inert, the state a
+  server veto leaves them in. Only `live` modules can be inert; the others
+  need a restart to change.
+
+Two modules that change the same bytes are reported in
+`kaentake_diag.txt` at startup (a message box in debug builds).
+
+**Features page.** `Launch Game.exe --features`, or holding Shift while
+the launcher starts, opens a window with one checkbox per switchable
+module. Play saves and starts the game, Save saves and exits, Cancel exits.
+It writes every switchable module's line to `[features]` and leaves the
+other keys alone.
+
+**Adding a module.** Write its attach function, declare it in `hook.h`, add
+its `.cpp` to `src/CMakeLists.txt` and one `X(...)` line to
+`src/feature_list.h`. Mark it `FEATURE_LIVE` only if its hooks and patches
+can be switched off while the game runs (no struct layout changes, no state
+that has to be cleaned up by one of its own hooks).

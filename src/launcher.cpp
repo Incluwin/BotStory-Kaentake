@@ -1,11 +1,13 @@
 #include "debug.h"
 #include "constants.h"
 #include "patcher.h"
+#include "featurespage.h"
 #include <windows.h>
 #include <detours.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 
 // Read the optional [config] resolution= key from config.ini and, if present
@@ -74,7 +76,35 @@ static void PropagateSysOptsFromConfig() {
 }
 
 
+// Removes a "--features" or "/features" argument; true if there was one.
+static bool TakeFeaturesFlag(std::string& sArgs) {
+    for (const char* sFlag : { "--features", "/features" }) {
+        size_t n = strlen(sFlag);
+        for (size_t i = sArgs.find(sFlag); i != std::string::npos; i = sArgs.find(sFlag, i + 1)) {
+            bool bStart = i == 0 || sArgs[i - 1] == ' ';
+            bool bEnd = i + n == sArgs.size() || sArgs[i + n] == ' ';
+            if (bStart && bEnd) {
+                sArgs.erase(i, n);
+                size_t first = sArgs.find_first_not_of(' ');
+                size_t last = sArgs.find_last_not_of(' ');
+                sArgs = first == std::string::npos ? std::string() : sArgs.substr(first, last - first + 1);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+    // "Launch Game.exe --features", or Shift held while it starts, opens the Features page first. The flag is not
+    // passed on to the game.
+    std::string sArgs = lpCmdLine ? lpCmdLine : "";
+    bool bFeatures = TakeFeaturesFlag(sArgs);
+    if ((bFeatures || (GetAsyncKeyState(VK_SHIFT) & 0x8000)) && !FeaturesPageRun()) {
+        return 0;
+    }
+
     if (!PatcherRun()) {
         return 1;
     }
@@ -88,7 +118,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(STARTUPINFOA);
 
-    if (!DetourCreateProcessWithDllExA("MapleStory.exe", lpCmdLine, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi, "kaentake.dll", NULL)) {
+    if (!DetourCreateProcessWithDllExA("MapleStory.exe", sArgs.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi, "kaentake.dll", NULL)) {
         DWORD dwError = GetLastError();
         LPSTR sErrorMessage = nullptr;
         FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, dwError, 0, (LPSTR)&sErrorMessage, 0, nullptr);
