@@ -43,17 +43,18 @@
 // called in injector.cpp -> DllMain
 void AttachSystemHooks();
 
-// called in system.cpp -> SetUnhandledExceptionFilter_hook
+// The client's modules: attached by features.cpp in the order of feature_list.h, which also holds their switches.
 void AttachClientBypass();
 void AttachClientInlink();
 void AttachStringPoolMod();
 void AttachResManMod();
-void AttachWzMapLimit(); // called in resman.cpp -> CWvsApp::InitializeResMan_hook
+void AttachWzMapLimit(); // deferred: resman.cpp's CWvsApp::InitializeResMan_hook attaches it
 void AttachAvatarDataMod();
 void AttachItemEffectMod();
 void AttachResolutionMod();
 void AttachMobHpTagMod();
 void AttachToolTipMod();
+void AttachFusionAnvilField();
 void AttachFusionAnvilMod();
 void AttachIconIconMod();
 void AttachTempStatMod();
@@ -71,34 +72,6 @@ void AttachMapInfoToolTip();
 void AttachQuestListColorMod();
 void AttachCrewWindowMod();
 void CrewWindowOnConnect();
-
-inline void AttachClientHooks() {
-    AttachClientBypass();
-    AttachClientInlink();
-    AttachStringPoolMod();
-    AttachResManMod();
-    AttachAvatarDataMod();
-    AttachItemEffectMod();
-    AttachResolutionMod();
-    AttachMobHpTagMod();
-    AttachToolTipMod();
-    AttachFusionAnvilMod();
-    AttachIconIconMod();
-    AttachTempStatMod();
-    AttachQuickLoginMod();
-    AttachRememberPasswordMod();
-    // AttachBossHPMod();  // disabled: duplicates the % shown by AttachMobHpTagMod under the boss icon
-    AttachChronicleExtras();
-    AttachEnlargeQuickslotMod();
-    AttachShoulderSlotsFix();
-    AttachIsCorrectBodyPartFix();
-    AttachGetBodyPartFromItemFix();
-    AttachFreeAddy();
-    AttachExtChainLightning();
-    AttachMapInfoToolTip();
-    AttachQuestListColorMod();
-    AttachCrewWindowMod();
-}
 
 
 template <typename T>

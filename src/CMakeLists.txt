@@ -18,6 +18,7 @@ add_library(injector SHARED
     stringpool.cpp
     debug.cpp
     hook.cpp
+    features.cpp
     quicklogin.cpp
     rememberpw.cpp
     cosmicSso.cpp

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "hook.h"
+#include "features.h"
 #include "constants.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -18,7 +19,7 @@ static SetUnhandledExceptionFilter_t SetUnhandledExceptionFilter_orig = reinterp
 LPTOP_LEVEL_EXCEPTION_FILTER WINAPI SetUnhandledExceptionFilter_hook(LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilter) {
     // ZExceptionHandler::ZExceptionHandler - after dynamic initializers for ZAllocEx<T>::_s_alloc
     if (reinterpret_cast<uintptr_t>(_ReturnAddress()) == 0x00796FDD) {
-        AttachClientHooks();
+        features::AttachClient();
     }
     return SetUnhandledExceptionFilter_orig(lpTopLevelExceptionFilter);
 }

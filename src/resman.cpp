@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "hook.h"
+#include "features.h"
 #include "debug.h"
 #include "wvs/wvsapp.h"
 #include "wvs/util.h"
@@ -182,7 +183,7 @@ public:
 
 void CWvsApp::InitializeResMan_hook() {
     DEBUG_MESSAGE("CWvsApp::InitializeResMan");
-    AttachWzMapLimit(); // before the original opens the archives
+    features::AttachDeferred(FeatureId::wz_map_limit); // before the original opens the archives
     CWvsApp::InitializeResMan(this);
 
     // add custom namespace to root

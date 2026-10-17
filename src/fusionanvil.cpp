@@ -670,11 +670,17 @@ int __fastcall CDraggableItem__OnDropped_hook(
 // Installer
 // ===========================================================================
 
-void AttachFusionAnvilMod() {
+// Core: the BotStory server writes nAnvilItemID into every equip (PacketCreator addItemInfo), so the client must
+// always read it, whether or not the transmog below is switched on.
+void AttachFusionAnvilField() {
     Patch4(kPatch_GetItemSlotSizeImm, kNewItemSlotEquipSize);
     Patch4(kPatch_SubtypeAllocSizeImm, kNewItemSlotEquipSize);
 
     ATTACH_HOOK(GW_ItemSlotBase__Decode, GW_ItemSlotBase__Decode_hook);
+}
+
+// The transmog itself: the look of an anviled equip, and using the Fusion Anvil item.
+void AttachFusionAnvilMod() {
     ATTACH_HOOK(AvatarLook__Load, AvatarLook__Load_hook);
     ATTACH_HOOK(CWvsContext__SendConsumeCashItemUseRequest,
                 CWvsContext__SendConsumeCashItemUseRequest_hook);

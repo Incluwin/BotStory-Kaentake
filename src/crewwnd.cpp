@@ -1365,12 +1365,9 @@ void CrewWindowOnConnect() {
     if (CCrewWnd::ms_pInstance) CCrewWnd::ms_pInstance->InvalidateRect(nullptr);
 }
 
+// Switched by config.ini [features] crew_window (or the older [config] crew_window), see feature_list.h.
 void AttachCrewWindowMod() {
     std::string config = ConfigPath();
-    if (GetPrivateProfileIntA("config", "crew_window", 1, config.c_str()) == 0) {
-        crew_log("off (config.ini crew_window=0)");
-        return;
-    }
     if (!v83::CheckClientVersion()) {
         crew_log("off: MapleStory.exe is not the build these offsets come from");
         return;

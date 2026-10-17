@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "hook.h"
 #include "debug.h"
+#include "features.h"
 #include <windows.h>
 #include <detours.h>
 #include <psapi.h>
@@ -65,6 +66,20 @@ void* FindPattern(unsigned char* pModuleBase, size_t uModuleSize, unsigned char*
 
 
 bool AttachHook(void** ppTarget, void* pDetour) {
+    void* pRequested = *ppTarget;
+    // The bytes Detours overwrites: the whole instructions under its 5-byte jmp.
+    auto pCode = static_cast<PBYTE>(DetourCodeFromPointer(pRequested, nullptr));
+    size_t uSize = 0;
+    while (pCode && uSize < 5) {
+        auto pNext = static_cast<PBYTE>(DetourCopyInstruction(nullptr, nullptr, pCode + uSize, nullptr, nullptr));
+        if (!pNext) {
+            uSize = 5;
+            break;
+        }
+        uSize = pNext - pCode;
+    }
+    // A LIVE module's hook goes through a thunk that checks the module's runtime switch.
+    void* pHook = features::detail::WrapDetour(pDetour);
     LONG result;
     if (result = DetourTransactionBegin(); result != NO_ERROR) {
         DEBUG_MESSAGE("DetourTransactionBegin failed with : %d", result);
@@ -75,16 +90,25 @@ bool AttachHook(void** ppTarget, void* pDetour) {
         DetourTransactionAbort();
         return false;
     }
-    if (result = DetourAttach(ppTarget, pDetour); result != NO_ERROR) {
+    PDETOUR_TRAMPOLINE pTrampoline = nullptr;
+    PVOID pRealTarget = nullptr;
+    if (result = DetourAttachEx(ppTarget, pHook, &pTrampoline, &pRealTarget, nullptr); result != NO_ERROR) {
         DEBUG_MESSAGE("DetourAttach failed with : %d", result);
         DetourTransactionAbort();
         return false;
+    }
+    if (pHook != pDetour) {
+        features::detail::SetWrappedOriginal(pHook, pTrampoline); // the trampoline's code starts the struct
     }
     if (result = DetourTransactionCommit(); result != NO_ERROR) {
         DEBUG_MESSAGE("DetourTransactionCommit failed with : %d", result);
         DetourTransactionAbort();
         return false;
     }
+    if (pHook != pDetour) {
+        features::detail::SetWrappedOriginal(pHook, *ppTarget);
+    }
+    features::detail::RecordHook(pRequested, pRealTarget, uSize);
     return true;
 }
 
@@ -146,6 +170,7 @@ void* GetAddressByPattern(const char* sModuleName, const char* sPattern) {
 void PatchMemory(void* pAddress, void* pValue, size_t uSize) {
     DWORD flOldProtect;
     VirtualProtect(pAddress, uSize, PAGE_EXECUTE_READWRITE, &flOldProtect);
+    features::detail::RecordPatch(pAddress, pValue, uSize);
     memcpy(pAddress, pValue, uSize);
     VirtualProtect(pAddress, uSize, flOldProtect, &flOldProtect);
 }
