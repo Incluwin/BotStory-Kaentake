@@ -245,6 +245,9 @@ void CWvsApp::InitializeResMan_hook() {
     }
     std::sort(g_vecOverrides.begin(), g_vecOverrides.end()); // uses operator<
 
+    // res_man's own hooks, made now that the archives are open
+    features::AttachScope scope(FeatureId::res_man);
+
     // NameSpace.dll - try resolving from g_pCustomNameSpace
     IWzNameSpaceImpl::raw__OnGetLocalObject_orig = static_cast<IWzNameSpaceImpl::raw__OnGetLocalObject_t>(GetAddressByPattern("NAMESPACE.DLL", "B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 81 EC 80"));
     ATTACH_HOOK(IWzNameSpaceImpl::raw__OnGetLocalObject_orig, IWzNameSpaceImpl::raw__OnGetLocalObject_hook);

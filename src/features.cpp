@@ -17,6 +17,7 @@
 #include <strsafe.h>
 #include <cstdarg>
 #include <cstdio>
+#include <share.h>
 #include <string>
 #include <vector>
 
@@ -146,8 +147,8 @@ void LogRecord(const Record& r) {
 
 void OpenLog() {
     std::string path = GameDir() + "\\kaentake_features.txt";
-    if (fopen_s(&g_pLog, path.c_str(), "w") != 0) {
-        g_pLog = nullptr;
+    g_pLog = _fsopen(path.c_str(), "w", _SH_DENYNO); // readable while the game runs
+    if (!g_pLog) {
         return;
     }
     Log("# Kaentake modules: attach order, then each hook and patch under the module that made it");
@@ -354,6 +355,15 @@ bool SetActive(FeatureId id, bool bActive) {
 const char* Name(FeatureId id) {
     size_t i = static_cast<size_t>(id);
     return i < kCount ? kFeatures[i].id : "none";
+}
+
+AttachScope::AttachScope(FeatureId id) : m_nOuter(g_nCurrent), m_uFrom(Records().size()) {
+    g_nCurrent = static_cast<int>(id);
+}
+
+AttachScope::~AttachScope() {
+    g_nCurrent = m_nOuter;
+    CheckSharedBytes(m_uFrom);
 }
 
 FeatureId Find(const char* sId) {

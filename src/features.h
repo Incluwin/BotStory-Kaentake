@@ -36,6 +36,20 @@ bool SetActive(FeatureId id, bool bActive);
 const char* Name(FeatureId id);
 FeatureId Find(const char* sId); // FeatureId::none when unknown
 
+// For hooks a module installs after its attach function returned (from inside one of its own hooks): records them
+// under that module, and checks them for shared bytes when the scope ends.
+class AttachScope {
+public:
+    explicit AttachScope(FeatureId id);
+    ~AttachScope();
+    AttachScope(const AttachScope&) = delete;
+    AttachScope& operator=(const AttachScope&) = delete;
+
+private:
+    int m_nOuter;
+    size_t m_uFrom;
+};
+
 }  // namespace features
 
 
