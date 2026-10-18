@@ -38,6 +38,8 @@ add_library(injector SHARED
     serverpackets.cpp
     featurehandshake.cpp
     crewwnd.cpp
+    statallap.cpp
+    beginnerap.cpp
 )
 
 target_precompile_headers(injector PRIVATE pch.h)

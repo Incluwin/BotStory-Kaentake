@@ -75,6 +75,8 @@ void AttachCrewWindowMod();
 void CrewWindowOnConnect();
 void AttachFeatureHandshake();
 void FeatureHandshakeOnConnect();
+void AttachStatAllApMod();  // statallap.cpp
+void AttachBeginnerApMod(); // beginnerap.cpp
 
 
 template <typename T>

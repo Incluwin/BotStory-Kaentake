@@ -53,7 +53,9 @@
     X(map_info_tool_tip,       "World map mob/NPC tooltips",             1, 0,                               none,          1, AttachMapInfoToolTip) \
     X(quest_list_color,        "Resident quests in blue",                1, FEATURE_LIVE,                    none,          1, AttachQuestListColorMod) \
     X(server_packets,          "BotStory server packets, feature handshake", 1, FEATURE_CORE,                none,          1, AttachServerPackets) \
-    X(crew_window,             "Crew window",                            1, 0,                               none,          1, AttachCrewWindowMod)
+    X(crew_window,             "Crew window",                            1, 0,                               none,          1, AttachCrewWindowMod) \
+    X(stat_all_ap,             "All-AP buttons in the stat window",      0, 0,                               none,          1, AttachStatAllApMod) \
+    X(beginner_ap,             "Beginners place AP at any level",        0, FEATURE_SERVER_GATED | FEATURE_LIVE, none,      1, AttachBeginnerApMod)
 
 // Keys that predate [features] and still switch a module when [features] has no line for it.
 struct FeatureAlias {

@@ -106,8 +106,14 @@ crew_window=1
   (`fusion_anvil`) can be switched off.
 - `requires`: `item_effect` needs `avatar_data`, `enlarge_quickslot` needs
   `resolution`. A module whose requirement is off stays off.
-- `server_gated` (`free_addy`, `ext_chain_lightning`) marks gameplay
-  changes: the BotStory server decides those at login (see below).
+- `server_gated` (`free_addy`, `ext_chain_lightning`, `beginner_ap`) marks
+  gameplay changes: the BotStory server decides those at login (see below).
+- Off by default, ported from LoganML/kaentake: `stat_all_ap` (an all-AP
+  button next to each AP up arrow; its art is Custom.wz
+  `UI/UIWindow.img/StatApMax`, made by `tools/make_stat_ap_art.py`, and
+  without it the stat window stays stock) and `beginner_ap` (Beginners
+  place AP at level 10 and below; the server's `beginner_ap` switch leaves
+  them the AP).
 - `log=1` (or `KAENTAKE_FEATURE_LOG=1` in the environment) writes
   `kaentake_features.txt` next to `MapleStory.exe`: the attach order and
   every hook and patch under the module that made it.

@@ -136,6 +136,41 @@ constexpr int kFontBlueBold = 32;  // 12px 0xFF2000FF, style SP 0x584
 constexpr int kFontRedBold = 33;   // 12px 0xFFFF2020, style SP 0x584
 }  // namespace crew
 
+// ---------------------------------------------------------------------------
+// The stat window, CUIStat (statallap.cpp, beginnerap.cpp). From the unpacked dump of the shipped build; the same
+// sites as LoganML/kaentake's statmax.cpp and Beginner AP lock, which they were ported from.
+namespace statwnd {
+constexpr uintptr_t kCtor            = 0x008C4842;  // CUIStat::CUIStat(int), 0x664 bytes (new'd at 0xA05C4C, 0xA20253)
+constexpr uintptr_t kDtor            = 0x008C4B3C;  // CUIStat::~CUIStat
+constexpr uintptr_t kResetButtons    = 0x008C79F5;  // (re)creates the AP up arrows (ids 2000-2005) and AUTO-ASSIGN (2007-2009)
+constexpr uintptr_t kEnableButtons   = 0x008C5845;  // enables them while the character has AP
+constexpr uintptr_t kOnButtonClicked = 0x008C522F;  // (nId): 2000-2009 handled here, the rest go to CUIWnd
+constexpr uintptr_t kWidthPush       = 0x008C4AB3;  // ctor: push 0xB0, the CreateWnd width
+constexpr uintptr_t kClosePush       = 0x008C485A;  // ctor: push 0x9C, the close button x (CUIWnd ctor argument)
+constexpr uintptr_t kBackgrndPush    = 0x008C4C9E;  // OnCreate: push 0xAF0E08 (L""), the background UOL it hands
+                                                    // CUIWnd::OnCreate 0x0092C2E8; empty = UI/UIWindow.img/Stat/backgrnd
+constexpr uintptr_t kEmptyWide       = 0x00AF0E08;  // L""
+constexpr uintptr_t kDetailAdd[]     = {0x008C4EA2, 0x008C5760, 0x008C6C72}; // add eax, 0xAA: the detail panel's x
+constexpr uintptr_t kDetailAnd       = 0x008C575B;  // and eax, -0xAA: the same offset in its 0-or-0xAA form
+constexpr uintptr_t kDetailBtPos     = 0x008C4E1B;  // push 0x144; push 0x7C: the DETAIL button's y and x (eax, edx live)
+constexpr uintptr_t kAutoBtPush[]    = {0x008C7D63, 0x008C7E1E, 0x008C7EDD}; // push 0x61: the AUTO-ASSIGN buttons' x
+constexpr uintptr_t kBtApUp          = 0x5B0;       // ZRef<CCtrlButton>[6] up arrows HP, MP, STR, DEX, INT, LUK (8 bytes, pointer +4)
+constexpr int kBtApUpX = 153;                       // the up arrows' x (12 px wide); STR..LUK y below
+constexpr int kBtApUpY[4] = {247, 265, 283, 301};
+// `cmp al, 0x0A; ja <normal>` on the level after the Beginner job check (0, 1000, 2000, 2001)
+constexpr uintptr_t kBeginnerLevelCmp[] = {
+    0x008C7A6C,  // ResetButtons: deletes the six up arrows and the AUTO-ASSIGN buttons
+    0x008C61A4,  // Draw: the Beginner layout of the AP area
+    0x008C53F0,  // tooltip: "Basic Stats"
+};
+constexpr uintptr_t kWvsContextInstance = 0x00BE7918; // TSingleton<CWvsContext>::ms_pInstance
+constexpr uintptr_t kCharacterData   = 0x20B8;      // CWvsContext: CharacterData* (GetCharacterData 0x00425D0B)
+constexpr uintptr_t kCharacterDataAp = 0x81;        // CharacterData: ZtlSecure<short> nAP, its key at +4
+constexpr uintptr_t kDecodeSecureShort = 0x004746DD; // cdecl (p, key) -> value, as EnableButtons reads nAP
+constexpr uintptr_t kUtilDlgYesNo    = 0x00992DFD;  // cdecl CUtilDlg::YesNo(ZXString<char>, 0, 1): 6 = Yes (AUTO-ASSIGN 0x008C8839)
+constexpr uintptr_t kSendApAutoAssign = 0x00A23B3D; // CWvsContext::SendAPAutoAssign(ZArray<pair<flag, amount>>*)
+}  // namespace statwnd
+
 // The login feature handshake (BotStory server docs/CLIENT_FEATURE_HANDSHAKE.md); the packet hooks are crew's above.
 namespace handshake {
 constexpr unsigned short kRecvOpcode = 0x17B;  // server -> client POLICY (server SendOpcode.CLIENT_FEATURES)
