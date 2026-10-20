@@ -7,7 +7,7 @@
 
 enum class FeatureId : int {
     none = -1,
-#define FEATURE_ENUM(id, title, def, flags, req, version, attach) id,
+#define FEATURE_ENUM(id, title, def, flags, section, req, version, attach) id,
     KAENTAKE_FEATURES(FEATURE_ENUM)
 #undef FEATURE_ENUM
     count

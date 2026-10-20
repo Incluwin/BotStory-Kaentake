@@ -13,16 +13,25 @@ struct Row {
     const char* title;
     bool bDefault;
     int nFlags;
+    FeatureSection eSection;
     const char* sRequires; // "none" when it needs no other module
 };
 
 // The same list Kaentake.dll attaches from; the attach functions are not referenced here.
 const Row kRows[] = {
-#define LAUNCHER_ROW(id, title, def, flags, req, version, attach) { #id, title, (def) != 0, (flags), #req },
+#define LAUNCHER_ROW(id, title, def, flags, section, req, version, attach) \
+    { #id, title, (def) != 0, (flags), FeatureSection::section, #req },
     KAENTAKE_FEATURES(LAUNCHER_ROW)
 #undef LAUNCHER_ROW
 };
 constexpr int kRowCount = sizeof(kRows) / sizeof(kRows[0]);
+
+const char* const kSectionTitles[] = {
+#define LAUNCHER_SECTION(id, title) title,
+    KAENTAKE_SECTIONS(LAUNCHER_SECTION)
+#undef LAUNCHER_SECTION
+};
+constexpr int kSectionCount = static_cast<int>(FeatureSection::count);
 
 // Not a module: the launcher's own switch for opening this page, kept in [features] next to the modules' lines.
 constexpr const char* kAtLaunchKey = "page_at_launch";
@@ -37,12 +46,14 @@ constexpr int kMargin = 12;
 constexpr int kColumnWidth = 280;
 constexpr int kRowHeight = 22;
 constexpr int kTextHeight = 18;
+constexpr int kIndent = 10; // a section's boxes, under its heading
 constexpr int kButtonWidth = 88;
 constexpr int kButtonHeight = 26;
 constexpr int kGap = 8;
 
 std::string g_sConfig;
 HFONT g_hFont = nullptr;
+HFONT g_hHeadingFont = nullptr;
 HWND g_aBox[kRowCount] = {};
 HWND g_hAtLaunch = nullptr;
 bool g_bPlay = false;
@@ -102,12 +113,28 @@ HWND AddControl(HWND hParent, const char* sClass, const char* sText, DWORD dwSty
     return hWnd;
 }
 
-int SwitchableCount() {
+bool IsShownIn(const Row& r, int nSection) {
+    return !(r.nFlags & FEATURE_CORE) && static_cast<int>(r.eSection) == nSection;
+}
+
+// Lines of boxes under a section's heading (two columns); 0 for a section with nothing to switch.
+int SectionLines(int nSection) {
     int n = 0;
     for (const auto& r : kRows) {
-        n += (r.nFlags & FEATURE_CORE) ? 0 : 1;
+        n += IsShownIn(r, nSection) ? 1 : 0;
     }
-    return n;
+    return (n + 1) / 2;
+}
+
+int ListHeight() {
+    int h = 0;
+    for (int s = 0; s < kSectionCount; ++s) {
+        int nLines = SectionLines(s);
+        if (nLines > 0) {
+            h += kTextHeight + nLines * kRowHeight + kGap;
+        }
+    }
+    return h;
 }
 
 int ClientWidth() {
@@ -115,9 +142,8 @@ int ClientWidth() {
 }
 
 int ClientHeight() {
-    int nLines = (SwitchableCount() + 1) / 2;
-    return kMargin + kTextHeight + kGap + nLines * kRowHeight + kGap + kTextHeight + kGap + kRowHeight + kGap
-           + kButtonHeight + kMargin;
+    return kMargin + kTextHeight + kGap + ListHeight() + kTextHeight + kGap + kRowHeight + kGap + kButtonHeight
+           + kMargin;
 }
 
 void CreateControls(HWND hWnd) {
@@ -126,26 +152,37 @@ void CreateControls(HWND hWnd) {
                SS_LEFT, kMargin, y, kColumnWidth * 2, kTextHeight, -1);
     y += kTextHeight + kGap;
 
-    int nLines = (SwitchableCount() + 1) / 2;
-    int nShown = 0;
-    for (int i = 0; i < kRowCount; ++i) {
-        const Row& r = kRows[i];
-        if (r.nFlags & FEATURE_CORE) {
+    // Each section: its heading, then its boxes in two columns (the first half on the left), in list order.
+    for (int s = 0; s < kSectionCount; ++s) {
+        int nLines = SectionLines(s);
+        if (nLines == 0) {
             continue;
         }
-        int nColumn = nShown / nLines;
-        int nLine = nShown % nLines;
-        ++nShown;
-        std::string sLabel = r.title;
-        if (r.nFlags & FEATURE_SERVER_GATED) {
-            sLabel += " *";
+        HWND hHeading = AddControl(hWnd, "STATIC", kSectionTitles[s], SS_LEFT, kMargin, y, kColumnWidth * 2,
+                                   kTextHeight, -1);
+        SendMessageA(hHeading, WM_SETFONT, reinterpret_cast<WPARAM>(g_hHeadingFont), FALSE);
+        y += kTextHeight;
+
+        int nShown = 0;
+        for (int i = 0; i < kRowCount; ++i) {
+            const Row& r = kRows[i];
+            if (!IsShownIn(r, s)) {
+                continue;
+            }
+            int nColumn = nShown / nLines;
+            int nLine = nShown % nLines;
+            ++nShown;
+            std::string sLabel = r.title;
+            if (r.nFlags & FEATURE_SERVER_GATED) {
+                sLabel += " *";
+            }
+            g_aBox[i] = AddControl(hWnd, "BUTTON", sLabel.c_str(), BS_AUTOCHECKBOX | WS_TABSTOP,
+                                   kMargin + kIndent + nColumn * kColumnWidth, y + nLine * kRowHeight,
+                                   kColumnWidth - kGap - kIndent, kRowHeight, kIdFirstBox + i);
+            SendMessageA(g_aBox[i], BM_SETCHECK, ReadFeatureSwitch(g_sConfig.c_str(), r.id, r.bDefault) ? BST_CHECKED : BST_UNCHECKED, 0);
         }
-        g_aBox[i] = AddControl(hWnd, "BUTTON", sLabel.c_str(), BS_AUTOCHECKBOX | WS_TABSTOP,
-                               kMargin + nColumn * kColumnWidth, y + nLine * kRowHeight, kColumnWidth - kGap, kRowHeight,
-                               kIdFirstBox + i);
-        SendMessageA(g_aBox[i], BM_SETCHECK, ReadFeatureSwitch(g_sConfig.c_str(), r.id, r.bDefault) ? BST_CHECKED : BST_UNCHECKED, 0);
+        y += nLines * kRowHeight + kGap;
     }
-    y += nLines * kRowHeight + kGap;
 
     AddControl(hWnd, "STATIC", "* Changes gameplay: the server may switch it off or require it.",
                SS_LEFT, kMargin, y, kColumnWidth * 2, kTextHeight, -1);
@@ -227,9 +264,15 @@ bool FeaturesPageRun() {
     ncm.cbSize = sizeof(ncm);
     if (SystemParametersInfoA(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0)) {
         g_hFont = CreateFontIndirectA(&ncm.lfMessageFont);
+        LOGFONTA lfHeading = ncm.lfMessageFont;
+        lfHeading.lfWeight = FW_BOLD;
+        g_hHeadingFont = CreateFontIndirectA(&lfHeading);
     }
     if (!g_hFont) {
         g_hFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    }
+    if (!g_hHeadingFont) {
+        g_hHeadingFont = g_hFont;
     }
 
     WNDCLASSA wc = {};

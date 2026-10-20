@@ -36,7 +36,7 @@ struct Feature {
 };
 
 const Feature kFeatures[] = {
-#define FEATURE_ROW(id, title, def, flags, req, version, attach) \
+#define FEATURE_ROW(id, title, def, flags, section, req, version, attach) \
     { #id, title, (def) != 0, (flags), FeatureId::req, (version), &attach },
     KAENTAKE_FEATURES(FEATURE_ROW)
 #undef FEATURE_ROW
@@ -50,13 +50,16 @@ constexpr bool SameText(const char* a, const char* b) {
 }
 
 // Build-time checks on the list (a duplicate id already fails as a duplicate enumerator).
-#define FEATURE_CHECK(id, title, def, flags, req, version, attach) \
+#define FEATURE_CHECK(id, title, def, flags, section, req, version, attach) \
     static_assert(FeatureId::req < FeatureId::id, #id ": the module it requires must come earlier in the list"); \
+    static_assert(!((flags) & FEATURE_CORE) == (FeatureSection::section != FeatureSection::core), \
+                  #id ": core modules, and only they, are in the core section"); \
     static_assert((version) >= 1 && (version) <= 0xFFFF, #id ": the version is 1..65535 (the handshake sends a short)"); \
     static_assert(!((flags) & FEATURE_CORE) || (def), #id ": a core module is always on"); \
     static_assert(!((flags) & FEATURE_CORE) || !((flags) & (FEATURE_LIVE | FEATURE_SERVER_GATED)), \
                   #id ": a core module has no switch"); \
-    static_assert(!SameText(#id, "log") && !SameText(#id, "inert"), #id ": reserved [features] key");
+    static_assert(!SameText(#id, "log") && !SameText(#id, "inert") && !SameText(#id, "page_at_launch"), \
+                  #id ": reserved [features] key");
 KAENTAKE_FEATURES(FEATURE_CHECK)
 #undef FEATURE_CHECK
 

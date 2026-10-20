@@ -11,9 +11,11 @@ On top of the upstream hooks (resolution, quickslot, tooltip, etc.) it adds:
 - **Version guard.** `v83_version_guard.cpp` bails at DLL attach if the
   host `MapleStory.exe` isn't the v83 build the offsets were written for.
 - **Feature switches.** Every module is one line in `src/feature_list.h`
-  (id, title, default, flags, requirement, attach function). The DLL
-  attaches them in that order and the launcher's Features page lists them;
-  see Features below.
+  (id, title, default, flags, section, requirement, attach function). The
+  DLL attaches them in that order and the launcher's Features page lists
+  them by section; see Features below.
+
+![The launcher's Features page](docs/features-page.png)
 
 The patcher code lives in `src/patcher.{h,cpp}` and is wired into
 `src/launcher.cpp` ahead of `DetourCreateProcessWithDllExA`. It links
@@ -81,6 +83,35 @@ resolution=1600x900
 
 ### Features
 
+The switchable modules, by the section the Features page lists them under.
+BotStory's three only do something on a BotStory server; the ones marked *
+change gameplay, so the server may switch them off or require them (see
+Feature handshake below).
+
+| Section | Module | `[features]` key | Default |
+|---|---|---|---|
+| BotStory | Fusion Anvil transmog | `fusion_anvil` | on |
+| BotStory | Resident quests in blue | `quest_list_color` | on |
+| BotStory | Crew window | `crew_window` | on |
+| Interface | Wide resolutions and config.ini prefs | `resolution` | on |
+| Interface | Custom item names and equip tooltips | `tool_tip` | on |
+| Interface | No exit ad, minimize button | `chronicle_extras` | on |
+| Interface | 26-slot quickslot bar | `enlarge_quickslot` | on |
+| Interface | World map mob/NPC tooltips | `map_info_tool_tip` | on |
+| Combat display | Mob HP bar with numbers | `mob_hp_tag` | on |
+| Combat display | Buff and skill cooldown display | `temp_stat` | on |
+| Combat display | Boss HP % under the boss bar | `boss_hp` | off |
+| Login | Quick login (skip world select) | `quick_login` | on |
+| Login | Remember login | `remember_password` | on |
+| Avatars and item effects | Avatar extras (taming mobs, chairs) | `avatar_data` | on |
+| Avatars and item effects | Item effects (ItemEff.img) | `item_effect` | on |
+| Gameplay (the server decides) | Gameplay patches (damage/speed caps) * | `free_addy` | on |
+| Gameplay (the server decides) | Chain Lightning range and damage * | `ext_chain_lightning` | on |
+| Fixes | Item icon drawing fix | `item_icon` | on |
+| Fixes | Shoulder equip slot fix | `shoulder_slots` | on |
+| Fixes | Equip body part check fix | `is_correct_body_part` | on |
+| Fixes | Equip body part lookup fix | `get_body_part_from_item` | on |
+
 Each module in `src/feature_list.h` has a `config.ini` line under
 `[features]`:
 
@@ -136,6 +167,8 @@ while it starts opens the page anyway.
 
 **Adding a module.** Write its attach function, declare it in `hook.h`, add
 its `.cpp` to `src/CMakeLists.txt` and one `X(...)` line to
-`src/feature_list.h`. Mark it `FEATURE_LIVE` only if its hooks and patches
+`src/feature_list.h`, with the section its checkbox goes under
+(`KAENTAKE_SECTIONS`; core modules are in `core`, which the page does not
+show). Mark it `FEATURE_LIVE` only if its hooks and patches
 can be switched off while the game runs (no struct layout changes, no state
 that has to be cleaned up by one of its own hooks).
