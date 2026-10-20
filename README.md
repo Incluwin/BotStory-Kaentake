@@ -8,10 +8,6 @@ On top of the upstream hooks (resolution, quickslot, tooltip, etc.) it adds:
   `manifest.txt` from a configured patch URL, SHA-256s local files (with a
   `.patch_cache` side-file so unchanged files skip rehashing), and pulls any
   files that differ. Atomic `.new` → rename; two-retry on hash mismatch.
-- **Bootstrap distribution.** Friends get a ~40 KB zip with only the
-  launcher + config + onboarding docs; the ~6.6 GB of game files download
-  on first launch over Tailscale. See `../patch-server/README.md` for the
-  end-to-end flow.
 - **Version guard.** `v83_version_guard.cpp` bails at DLL attach if the
   host `MapleStory.exe` isn't the v83 build the offsets were written for.
 - **Feature switches.** Every module is one line in `src/feature_list.h`
@@ -129,11 +125,14 @@ player's own switches are never turned on. A server without the handshake
 never answers. Its lines go to `kaentake_diag.txt` as `[handshake]`. Server
 side: BotStory Server `docs/CLIENT_FEATURE_HANDSHAKE.md`.
 
-**Features page.** `Launch Game.exe --features`, or holding Shift while
-the launcher starts, opens a window with one checkbox per switchable
-module. Play saves and starts the game, Save saves and exits, Cancel exits.
-It writes every switchable module's line to `[features]` and leaves the
-other keys alone.
+**Features page.** The launcher opens a window with one checkbox per
+switchable module before it patches and starts the game. Play saves and
+starts the game, Save saves and exits, Cancel exits. It writes every
+switchable module's line to `[features]` and leaves the other keys alone.
+Its last checkbox, "Show this page when the game starts", is saved as
+`page_at_launch` (default `1`); with `page_at_launch=0` the launcher goes
+straight to the game, and `Launch Game.exe --features` or holding Shift
+while it starts opens the page anyway.
 
 **Adding a module.** Write its attach function, declare it in `hook.h`, add
 its `.cpp` to `src/CMakeLists.txt` and one `X(...)` line to

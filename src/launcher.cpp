@@ -97,11 +97,11 @@ static bool TakeFeaturesFlag(std::string& sArgs) {
 
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-    // "Launch Game.exe --features", or Shift held while it starts, opens the Features page first. The flag is not
-    // passed on to the game.
+    // The Features page opens first unless it was switched off (page_at_launch=0); "Launch Game.exe --features", or
+    // Shift held while it starts, opens it anyway. The flag is not passed on to the game.
     std::string sArgs = lpCmdLine ? lpCmdLine : "";
     bool bFeatures = TakeFeaturesFlag(sArgs);
-    if ((bFeatures || (GetAsyncKeyState(VK_SHIFT) & 0x8000)) && !FeaturesPageRun()) {
+    if ((bFeatures || (GetAsyncKeyState(VK_SHIFT) & 0x8000) || FeaturesPageAtLaunch()) && !FeaturesPageRun()) {
         return 0;
     }
 

@@ -24,9 +24,13 @@ const Row kRows[] = {
 };
 constexpr int kRowCount = sizeof(kRows) / sizeof(kRows[0]);
 
+// Not a module: the launcher's own switch for opening this page, kept in [features] next to the modules' lines.
+constexpr const char* kAtLaunchKey = "page_at_launch";
+
 constexpr int kIdFirstBox = 1000;
 constexpr int kIdSave = 101;
 constexpr int kIdDefaults = 102;
+constexpr int kIdAtLaunch = 103;
 
 // 96-dpi pixels (the launcher is not DPI aware; Windows scales the window)
 constexpr int kMargin = 12;
@@ -40,6 +44,7 @@ constexpr int kGap = 8;
 std::string g_sConfig;
 HFONT g_hFont = nullptr;
 HWND g_aBox[kRowCount] = {};
+HWND g_hAtLaunch = nullptr;
 bool g_bPlay = false;
 bool g_bDone = false;
 
@@ -50,6 +55,10 @@ std::string ExeDir() {
     std::string s(path, n);
     size_t slash = s.find_last_of("\\/");
     return slash == std::string::npos ? std::string(".") : s.substr(0, slash);
+}
+
+std::string ConfigPath() {
+    return ExeDir() + "\\" CONSTANTS_CONFIG_NAME;
 }
 
 int RowIndex(const char* sId) {
@@ -82,7 +91,8 @@ bool Save() {
             return false;
         }
     }
-    return true;
+    return !g_hAtLaunch || WritePrivateProfileStringA("features", kAtLaunchKey, IsChecked(g_hAtLaunch) ? "1" : "0",
+                                                      g_sConfig.c_str());
 }
 
 HWND AddControl(HWND hParent, const char* sClass, const char* sText, DWORD dwStyle, int x, int y, int w, int h, int nId) {
@@ -106,7 +116,8 @@ int ClientWidth() {
 
 int ClientHeight() {
     int nLines = (SwitchableCount() + 1) / 2;
-    return kMargin + kTextHeight + kGap + nLines * kRowHeight + kGap + kTextHeight + kGap + kButtonHeight + kMargin;
+    return kMargin + kTextHeight + kGap + nLines * kRowHeight + kGap + kTextHeight + kGap + kRowHeight + kGap
+           + kButtonHeight + kMargin;
 }
 
 void CreateControls(HWND hWnd) {
@@ -140,6 +151,11 @@ void CreateControls(HWND hWnd) {
                SS_LEFT, kMargin, y, kColumnWidth * 2, kTextHeight, -1);
     y += kTextHeight + kGap;
 
+    g_hAtLaunch = AddControl(hWnd, "BUTTON", "Show this page when the game starts (hold Shift to open it when off)",
+                             BS_AUTOCHECKBOX | WS_TABSTOP, kMargin, y, kColumnWidth * 2, kRowHeight, kIdAtLaunch);
+    SendMessageA(g_hAtLaunch, BM_SETCHECK, FeaturesPageAtLaunch() ? BST_CHECKED : BST_UNCHECKED, 0);
+    y += kRowHeight + kGap;
+
     AddControl(hWnd, "BUTTON", "Defaults", BS_PUSHBUTTON | WS_TABSTOP, kMargin, y, kButtonWidth, kButtonHeight, kIdDefaults);
     int x = ClientWidth() - kMargin - kButtonWidth * 3 - kGap * 2;
     AddControl(hWnd, "BUTTON", "Play", BS_DEFPUSHBUTTON | WS_TABSTOP, x, y, kButtonWidth, kButtonHeight, IDOK);
@@ -167,6 +183,7 @@ LRESULT CALLBACK FeaturesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
                     SendMessageA(g_aBox[i], BM_SETCHECK, kRows[i].bDefault ? BST_CHECKED : BST_UNCHECKED, 0);
                 }
             }
+            SendMessageA(g_hAtLaunch, BM_SETCHECK, BST_CHECKED, 0);
             UpdateRequirements();
             return 0;
         }
@@ -198,8 +215,12 @@ LRESULT CALLBACK FeaturesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 }  // namespace
 
 
+bool FeaturesPageAtLaunch() {
+    return ReadFeatureSwitch(ConfigPath().c_str(), kAtLaunchKey, true);
+}
+
 bool FeaturesPageRun() {
-    g_sConfig = ExeDir() + "\\" CONSTANTS_CONFIG_NAME;
+    g_sConfig = ConfigPath();
     HINSTANCE hInstance = GetModuleHandleA(nullptr);
 
     NONCLIENTMETRICSA ncm = {};
