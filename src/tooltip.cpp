@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "hook.h"
 #include "debug.h"
+#include "setitems.h"
 #include "wvs/secure.h"
 #include "wvs/tooltip.h"
 #include "wvs/iteminfo.h"
@@ -151,6 +152,8 @@ void CUIToolTip::SetToolTip_Equip_Basic_hook(GW_ItemSlotEquip* pe) {
         sLine.Format("%s (Transmog)", sSkinName);
         AddInfoEx(14, 15, "APPEARANCE :", sLine, 1, 1001);
     }
+
+    setitems::OnEquipBasic(this, nItemID); // the set_items module's rows, if it is on
 }
 
 
@@ -170,6 +173,9 @@ void __fastcall CUIToolTip__DrawToolTip_Equip_hook(
     CUIToolTip* pThis, void* /*edx*/, int a2, GW_ItemSlotEquip* pe)
 {
     CUIToolTip__DrawToolTip_Equip(pThis, a2, pe);
+    if (pe) {
+        setitems::OnDrawEquip(pThis, pe->nItemID); // the set_items module's tooltip beside this one
+    }
     if (!pe || !pe->nAnvilItemID || !pThis || !pThis->m_pLayer) return;
     try {
         Ztl_variant_t vIdx;

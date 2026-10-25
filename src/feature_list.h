@@ -74,7 +74,8 @@ enum class FeatureSection : int {
     X(map_info_tool_tip,       "World map mob/NPC tooltips",             1, 0,                                      ui,       none,          1, AttachMapInfoToolTip) \
     X(quest_list_color,        "Resident quests in blue",                1, FEATURE_LIVE,                           botstory, none,          1, AttachQuestListColorMod) \
     X(server_packets,          "BotStory server packets, feature handshake", 1, FEATURE_CORE,                       core,     none,          1, AttachServerPackets) \
-    X(crew_window,             "Crew window",                            1, 0,                                      botstory, none,          1, AttachCrewWindowMod)
+    X(crew_window,             "Crew window",                            1, 0,                                      botstory, none,          1, AttachCrewWindowMod) \
+    X(set_items,               "Set item tooltips",                      1, FEATURE_LIVE,                           botstory, tool_tip,      1, AttachSetItemsMod)
 
 // Keys that predate [features] and still switch a module when [features] has no line for it.
 struct FeatureAlias {
