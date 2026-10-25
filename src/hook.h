@@ -74,9 +74,11 @@ void AttachQuestListColorMod();
 void AttachServerPackets(); // serverpackets.cpp: the BotStory server's packets, then AttachFeatureHandshake
 void AttachCrewWindowMod();
 void AttachSetItemsMod();
+void AttachStorageBagMod();
 void CrewWindowOnConnect();
 void AttachFeatureHandshake();
 void FeatureHandshakeOnConnect();
+bool FeatureHandshakeAllows(const char* sId);
 
 
 template <typename T>

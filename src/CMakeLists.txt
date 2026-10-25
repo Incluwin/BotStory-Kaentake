@@ -40,6 +40,7 @@ add_library(injector SHARED
     featurehandshake.cpp
     crewwnd.cpp
     setitems.cpp
+    storagebag.cpp
 )
 
 target_precompile_headers(injector PRIVATE pch.h)

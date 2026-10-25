@@ -3,6 +3,7 @@
 #include "clientloop.h"
 #include "constants.h"
 #include "debug.h"
+#include "v83_offsets.h"
 #include "wvs/wvsapp.h"
 #include "wvs/wndman.h"
 #include "wvs/stage.h"
@@ -24,6 +25,49 @@ clientloop::FrameHandler g_apOnFrame[16];
 size_t g_uOnFrame = 0;
 clientloop::MessageFilter g_apOnMessage[8];
 size_t g_uOnMessage = 0;
+clientloop::FrameHandler g_apOnLeaveGame[8];
+size_t g_uOnLeaveGame = 0;
+clientloop::FrameHandler g_apOnClearFieldUI[8];
+size_t g_uOnClearFieldUI = 0;
+clientloop::DropFilter g_apOnItemDropped[8];
+size_t g_uOnItemDropped = 0;
+
+template <typename T, size_t N>
+void AddHandler(T (&apList)[N], size_t& uCount, T pHandler, const char* sWhat) {
+    if (uCount == N) {
+        LogMessage("[client_loop] too many %s; one is not called", sWhat);
+        return;
+    }
+    apList[uCount++] = pHandler;
+}
+
+auto CWvsContext__OnLeaveGame = reinterpret_cast<void(__thiscall*)(void*)>(v83::loop::kOnLeaveGame);
+void __fastcall CWvsContext__OnLeaveGame_hook(void* pThis, void* /*edx*/) {
+    for (size_t i = 0; i < g_uOnLeaveGame; ++i) {
+        g_apOnLeaveGame[i]();
+    }
+    CWvsContext__OnLeaveGame(pThis);
+}
+
+auto CWvsContext__ClearFieldUI = reinterpret_cast<void(__thiscall*)(void*)>(v83::loop::kClearFieldUI);
+void __fastcall CWvsContext__ClearFieldUI_hook(void* pThis, void* /*edx*/) {
+    for (size_t i = 0; i < g_uOnClearFieldUI; ++i) {
+        g_apOnClearFieldUI[i]();
+    }
+    CWvsContext__ClearFieldUI(pThis);
+}
+
+auto CDraggableItem__OnDropped = reinterpret_cast<int(__thiscall*)(void*, void*, void*, int, int)>(
+        v83::loop::kDraggableOnDropped);
+int __fastcall CDraggableItem__OnDropped_hook(void* pThis, void* /*edx*/, void* pFrom, void* pTo, int rx, int ry) {
+    for (size_t i = 0; i < g_uOnItemDropped; ++i) {
+        int nResult = 0;
+        if (g_apOnItemDropped[i](pThis, pFrom, pTo, rx, ry, &nResult)) {
+            return nResult;
+        }
+    }
+    return CDraggableItem__OnDropped(pThis, pFrom, pTo, rx, ry);
+}
 
 }  // namespace
 
@@ -43,6 +87,18 @@ void OnMessage(MessageFilter pFilter) {
         return;
     }
     g_apOnMessage[g_uOnMessage++] = pFilter;
+}
+
+void OnLeaveGame(FrameHandler pHandler) {
+    AddHandler(g_apOnLeaveGame, g_uOnLeaveGame, pHandler, "leave-game handlers");
+}
+
+void OnClearFieldUI(FrameHandler pHandler) {
+    AddHandler(g_apOnClearFieldUI, g_uOnClearFieldUI, pHandler, "clear-field handlers");
+}
+
+void OnItemDropped(DropFilter pFilter) {
+    AddHandler(g_apOnItemDropped, g_uOnItemDropped, pFilter, "drop filters");
 }
 
 }  // namespace clientloop
@@ -421,6 +477,9 @@ void AttachClientBypass() {
     ATTACH_HOOK(CWvsApp::Run, CWvsApp::Run_hook);
     ATTACH_HOOK(CLogin::SendCheckPasswordPacket, CLogin::SendCheckPasswordPacket_hook);
     ATTACH_HOOK(CWndMan::TranslateMessage, CWndMan::TranslateMessage_hook);
+    ATTACH_HOOK(CWvsContext__OnLeaveGame, CWvsContext__OnLeaveGame_hook);
+    ATTACH_HOOK(CWvsContext__ClearFieldUI, CWvsContext__ClearFieldUI_hook);
+    ATTACH_HOOK(CDraggableItem__OnDropped, CDraggableItem__OnDropped_hook);
 
     PatchRetZero(0x009FEC62); // CWvsApp::EnableWinKey
     PatchRetZero(0x009F18C9); // ShowStartUpWndModal

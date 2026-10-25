@@ -25,6 +25,7 @@ using namespace featureproto;
 namespace {
 
 bool g_bReported = false; // on this connection
+std::vector<std::string> g_allowed; // the modules this connection's last POLICY allowed or required
 
 void hs_log(const char* fmt, ...) {
     FILE* fp = nullptr;
@@ -66,7 +67,11 @@ void SendReport(ClientOp op) {
 void Apply(const Policy& policy) {
     std::string inertNow, offNextStart, activeNow, lifted;
     auto add = [](std::string& s, const char* sId) { s += (s.empty() ? "" : ",") + std::string(sId); };
+    g_allowed.clear();
     for (const auto& a : policy.answers) {
+        if (a.decision != DECISION_DENY) {
+            g_allowed.push_back(a.id);
+        }
         FeatureId id = features::Find(a.id.c_str());
         if (id == FeatureId::none || (features::Flags(id) & FEATURE_CORE)) {
             continue; // a module this build does not have, or one that is never switched
@@ -128,6 +133,18 @@ void OnSetField() {
 // Called by bypass.cpp's CClientSocket::Connect hook: a new connection has not reported yet.
 void FeatureHandshakeOnConnect() {
     g_bReported = false;
+    g_allowed.clear();
+}
+
+// Whether this connection's server answered the handshake and allowed (or required) the module: false before its
+// POLICY and on a server without the handshake. For a module that needs the server's half (the Storage Bag window).
+bool FeatureHandshakeAllows(const char* sId) {
+    for (const auto& id : g_allowed) {
+        if (_stricmp(id.c_str(), sId) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // server_packets' attach function calls this once its ProcessPacket hook is in.

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "hook.h"
+#include "clientloop.h"
 #include "constants.h"
 #include "v83_offsets.h"
 #include "v83_version_guard.h"
@@ -25,8 +26,8 @@
 //                                 HELLO follows the first SET_FIELD of each connection.
 //   CWndMan::ProcessKey           the hotkey, only while no edit box has the focus (so never while chatting) and only
 //                                 when the key is unbound in the player's key map.
-//   CWvsContext::OnLeaveGame      the window closes; WELCOME is forgotten.
-//   CWvsContext::ClearFieldUI     the window closes (Cash Shop, MTS).
+//   clientloop::OnLeaveGame       the window closes; WELCOME is forgotten.
+//   clientloop::OnClearFieldUI    the window closes (Cash Shop, MTS).
 // config.ini [config]: crew_window=0 skips every hook; crew_hotkey=<letter or digit> (default U).
 
 using namespace v83::crew;
@@ -1284,21 +1285,16 @@ int __fastcall CWndMan__ProcessKey_hook(void* pThis, void* /*edx*/, unsigned int
 
 // ---- teardown ---------------------------------------------------------------------------------------------------
 
-auto CWvsContext__OnLeaveGame = reinterpret_cast<void(__thiscall*)(void*)>(kOnLeaveGame);
-auto CWvsContext__ClearFieldUI = reinterpret_cast<void(__thiscall*)(void*)>(kClearFieldUI);
-
-void __fastcall CWvsContext__OnLeaveGame_hook(void* pThis, void* /*edx*/) {
+void OnCrewLeaveGame() {
     CloseWindow(false);
     g_bEnabled = false;
     g_nProtocol = 0;
     g_snap = Snapshot();
     g_page = Page();
-    CWvsContext__OnLeaveGame(pThis);
 }
 
-void __fastcall CWvsContext__ClearFieldUI_hook(void* pThis, void* /*edx*/) {
+void OnCrewClearFieldUI() {
     CloseWindow(true);
-    CWvsContext__ClearFieldUI(pThis);
 }
 
 // config.ini next to MapleStory.exe (the working directory is not always the game folder)
@@ -1343,8 +1339,8 @@ void AttachCrewWindowMod() {
     serverpackets::OnRecv(kRecvOpcode, OnCrewRecv);
     serverpackets::OnSetField(OnCrewSetField);
     ATTACH_HOOK(CWndMan__ProcessKey, CWndMan__ProcessKey_hook);
-    ATTACH_HOOK(CWvsContext__OnLeaveGame, CWvsContext__OnLeaveGame_hook);
-    ATTACH_HOOK(CWvsContext__ClearFieldUI, CWvsContext__ClearFieldUI_hook);
+    clientloop::OnLeaveGame(OnCrewLeaveGame);
+    clientloop::OnClearFieldUI(OnCrewClearFieldUI);
     g_bHooksOn = true;
     crew_log("on, hotkey %c%s", static_cast<char>(g_uHotkeyVk), g_bSelfTest ? ", self-test" : "");
 }

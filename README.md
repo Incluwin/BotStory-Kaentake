@@ -84,7 +84,7 @@ resolution=1600x900
 ### Features
 
 The switchable modules, by the section the Features page lists them under.
-BotStory's four only do something on a BotStory server; the ones marked *
+BotStory's modules only do something on a BotStory server; the ones marked *
 change gameplay, so the server may switch them off or require them (see
 Feature handshake below).
 
@@ -94,6 +94,7 @@ Feature handshake below).
 | BotStory | Resident quests in blue | `quest_list_color` | on |
 | BotStory | Crew window | `crew_window` | on |
 | BotStory | Set item tooltips | `set_items` | on |
+| BotStory | Storage Bags (ores, scrolls, chairs, mounts) | `storage_bag` | on |
 | Interface | Wide resolutions and config.ini prefs | `resolution` | on |
 | Interface | Custom item names and equip tooltips | `tool_tip` | on |
 | Interface | No exit ad, minimize button | `chronicle_extras` | on |

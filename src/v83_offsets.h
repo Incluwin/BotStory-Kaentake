@@ -119,8 +119,6 @@ constexpr uintptr_t kWndManFocus          = 0x88;       // CWndMan: the focused 
 constexpr uintptr_t kFuncKeyMappedMan     = 0x00BED5A0; // TSingleton<CFuncKeyMappedMan>::ms_pInstance (ctor 0x0058DD0D)
 constexpr uintptr_t kFuncKeyMappedOffset  = 0x4;        // FUNCKEY_MAPPED[89] { char nType; long nID; }
 constexpr int kFuncKeySlots = 89;
-constexpr uintptr_t kOnLeaveGame          = 0x00A041FF; // CWvsContext::OnLeaveGame
-constexpr uintptr_t kClearFieldUI         = 0x00A04920; // CWvsContext::ClearFieldUI (Cash Shop / MTS stage Init)
 constexpr uintptr_t kRttiCWnd             = 0x00BF1608; // CWnd::ms_RTTI (CUIWnd's 0x00BF11DC points here)
 constexpr uintptr_t kGetBasicFont         = 0x0098A707; // get_basic_font(IWzFontPtr*, type)
 constexpr uintptr_t kPlayUiSound          = 0x00989588; // play_ui_sound(L"leaf"), prefixes Sound.wz/UI.img/
@@ -143,5 +141,39 @@ constexpr unsigned short kSendOpcode = 0x118;  // client -> server REPORT / APPL
 constexpr int kProtocol = 1;
 constexpr int kDllBuild = 20261017;
 }  // namespace handshake
+
+// ---------------------------------------------------------------------------
+// The engine events bypass.cpp hooks once for every module (clientloop.h), so no two modules hook the same bytes.
+namespace loop {
+constexpr uintptr_t kOnLeaveGame        = 0x00A041FF; // CWvsContext::OnLeaveGame
+constexpr uintptr_t kClearFieldUI       = 0x00A04920; // CWvsContext::ClearFieldUI (Cash Shop / MTS stage Init)
+constexpr uintptr_t kDraggableOnDropped = 0x004EF140; // CDraggableItem::OnDropped(from, to, rx, ry)
+}  // namespace loop
+
+// ---------------------------------------------------------------------------
+// Storage Bag window (storagebag.cpp), the community Storage Bag release's addresses. Each checked on the unpacked
+// dump (2026-10-25): every entry is a function start, and the drag start is CUIItem::OnMouseButton's own sequence at
+// 0x0081D7D6 (ZAlloc on kZAllocInstance, kDraggableInit, kDraggableItemVtbl, kBeginDragDrop on CWndMan).
+namespace bag {
+constexpr unsigned short kRecvOpcode = 0x17E;          // server -> client snapshot (server SendOpcode.BAG_WINDOW)
+constexpr unsigned short kSendOpcode = 0x119;          // client -> server request (server RecvOpcode.BAG_WINDOW)
+constexpr uintptr_t kItemWnd            = 0x00BED654;   // TSingleton<CUIItem>::ms_pInstance (set in its ctor, 0x0081C455)
+constexpr uintptr_t kItemWndDraw        = 0x0081DC20;   // CUIItem::Draw(const RECT*)
+constexpr uintptr_t kFieldOnKey         = 0x00529968;   // CField::OnKey(wParam, lParam)
+constexpr uintptr_t kInputSystem        = 0x00BEC33C;   // TSingleton<CInputSystem>::ms_pInstance
+constexpr uintptr_t kGetCursorPos       = 0x0059A388;   // CInputSystem::GetCursorPos(POINT*), screen coordinates
+constexpr uintptr_t kSetCursorState     = 0x0059A6D9;   // CInputSystem::SetCursorState(int), UI/Basic.img/Cursor/<n>
+constexpr uintptr_t kZAllocInstance     = 0x00BF0B00;   // the ZAllocEx the drag manager's objects come from
+constexpr uintptr_t kZAllocAlloc        = 0x00403065;   // ZAllocEx::Alloc(size)
+constexpr uintptr_t kDraggableInit      = 0x006FFDA3;   // IDraggable init(icon layer): the icon at +0xC
+constexpr uintptr_t kDraggableItemVtbl  = 0x00AF34D8;   // CDraggableItem's vtable
+constexpr uintptr_t kBeginDragDrop      = 0x009E353D;   // CWndMan::BeginDragDrop(source, draggable)
+constexpr uintptr_t kWndManDragSource   = 0x90;         // CWndMan: the active drag's source (0: none)
+constexpr uintptr_t kDecodeItem         = 0x004E33F9;   // GW_ItemSlotBase::Decode(ZRef*, CInPacket*); fusion_anvil_field hooks it
+constexpr uintptr_t kItemIdGetData      = 0x0042873D;   // TSecType<long>::GetData: the item id at GW_ItemSlotBase+0xC
+constexpr uintptr_t kShowItemToolTip    = 0x008F5B20;   // CUIToolTip::ShowItemToolTip(x, y, item, ...)
+constexpr uintptr_t kGetAbsLeft         = 0x009E03C5;   // IUIMsgHandler::GetAbsLeft of a CWnd (its +4)
+constexpr uintptr_t kGetAbsTop          = 0x009E0447;   // IUIMsgHandler::GetAbsTop of a CWnd (its +4)
+}  // namespace bag
 
 }  // namespace v83

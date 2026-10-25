@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "hook.h"
+#include "clientloop.h"
 #include "debug.h"
 #include "wvs/wnd.h"
 #include "wvs/iteminfo.h"
@@ -20,7 +21,6 @@ static constexpr uintptr_t kAddr_ItemSlotBase_Decode          = 0x004E33F9;
 static constexpr uintptr_t kAddr_InPacket_Decode4             = 0x00406629;
 static constexpr uintptr_t kAddr_SendConsumeCash              = 0x00A0A63F;
 static constexpr uintptr_t kAddr_SendEtcCash                  = 0x00A1DC5B;
-static constexpr uintptr_t kAddr_DraggableItem_OnDropped      = 0x004EF140;
 static constexpr uintptr_t kAddr_DraggableItem_OnDoubleClick  = 0x004EFD25;
 static constexpr uintptr_t kAddr_get_consume_cash_item_type   = 0x004863D5;
 static constexpr uintptr_t kAddr_play_ui_sound                = 0x00989588;
@@ -625,18 +625,13 @@ int __fastcall CDraggableItem__OnDoubleClicked_hook(CDraggableItem* pThis, void*
 
 
 // ===========================================================================
-// Hook 4: CDraggableItem::OnDropped — route drops into our dialog.
+// Hook 4: CDraggableItem::OnDropped (clientloop's, shared) — route drops into our dialog.
 // ===========================================================================
 
-static auto CDraggableItem__OnDropped =
-    reinterpret_cast<int(__thiscall*)(CDraggableItem*, IUIMsgHandler*, IUIMsgHandler*, int, int)>(
-        kAddr_DraggableItem_OnDropped);
-
-int __fastcall CDraggableItem__OnDropped_hook(
-    CDraggableItem* pThis, void* /*edx*/,
-    IUIMsgHandler* pFrom, IUIMsgHandler* pTo, int rx, int ry)
+// The drop on our dialog: the item goes into its slot. Called by FusionAnvil_OnItemDropped below.
+static int PutDroppedItem(CDraggableItem* pThis, IUIMsgHandler* pTo, int rx, int ry)
 {
-    if (pTo && pTo->IsKindOf(&CUIFusionAnvil::ms_RTTI)) {
+    {
         // `pTo` arrives as the IUIMsgHandler sub-object pointer (offset +4
         // inside the real CUIFusionAnvil layout). static_cast tells the
         // compiler about the inheritance so it adjusts the pointer back to
@@ -662,7 +657,17 @@ int __fastcall CDraggableItem__OnDropped_hook(
         if (!pItem) return 0;
         return pDialog->PutItem(pItem, pThis->m_nItemTI, pThis->m_nSlotPosition, rx, ry);
     }
-    return CDraggableItem__OnDropped(pThis, pFrom, pTo, rx, ry);
+}
+
+// clientloop's CDraggableItem::OnDropped filter: drops over our dialog are ours, every other drop goes on.
+static bool FusionAnvil_OnItemDropped(void* pDraggable, void* /*pFrom*/, void* pTo, int rx, int ry, int* pnResult)
+{
+    IUIMsgHandler* pTarget = static_cast<IUIMsgHandler*>(pTo);
+    if (!pTarget || !pTarget->IsKindOf(&CUIFusionAnvil::ms_RTTI)) {
+        return false;
+    }
+    *pnResult = PutDroppedItem(static_cast<CDraggableItem*>(pDraggable), pTarget, rx, ry);
+    return true;
 }
 
 
@@ -684,7 +689,7 @@ void AttachFusionAnvilMod() {
     ATTACH_HOOK(AvatarLook__Load, AvatarLook__Load_hook);
     ATTACH_HOOK(CWvsContext__SendConsumeCashItemUseRequest,
                 CWvsContext__SendConsumeCashItemUseRequest_hook);
-    ATTACH_HOOK(CDraggableItem__OnDropped, CDraggableItem__OnDropped_hook);
+    clientloop::OnItemDropped(FusionAnvil_OnItemDropped);
     ATTACH_HOOK(CWvsContext__SendEtcCashItemUseRequest,
                 CWvsContext__SendEtcCashItemUseRequest_hook);
     ATTACH_HOOK(CDraggableItem__OnDoubleClicked, CDraggableItem__OnDoubleClicked_hook);
