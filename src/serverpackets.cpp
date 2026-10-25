@@ -14,14 +14,8 @@ using namespace v83::crew; // the packet offsets were found for the Crew window
 
 namespace {
 
-struct Route {
-    unsigned short uOpcode;
-    serverpackets::RecvHandler pHandler;
-};
-
-Route g_aRoutes[8];
-size_t g_uRoutes = 0;
-serverpackets::FieldHandler g_apOnSetField[8];
+serverroutes::Table<32> g_routes;
+serverpackets::FieldHandler g_apOnSetField[16];
 size_t g_uOnSetField = 0;
 
 void log_line(const char* s) {
@@ -61,6 +55,11 @@ bool PeekOpcode(void* pPacket, unsigned short* pOp, const unsigned char** ppBody
     }
 }
 
+// What CInPacket::Decode2 does to the read offset; PeekOpcode has checked the two bytes are there.
+void SkipOpcode(CInPacket* pPacket) {
+    reinterpret_cast<InPacketView*>(pPacket)->uOffset += 2;
+}
+
 auto CClientSocket__ProcessPacket = reinterpret_cast<void(__thiscall*)(void*, void*)>(kProcessPacket);
 
 void __fastcall CClientSocket__ProcessPacket_hook(void* pThis, void* /*edx*/, void* pPacket) {
@@ -68,13 +67,8 @@ void __fastcall CClientSocket__ProcessPacket_hook(void* pThis, void* /*edx*/, vo
     const unsigned char* body = nullptr;
     size_t len = 0;
     bool peeked = PeekOpcode(pPacket, &op, &body, &len);
-    if (peeked) {
-        for (size_t i = 0; i < g_uRoutes; ++i) {
-            if (g_aRoutes[i].uOpcode == op) {
-                g_aRoutes[i].pHandler(body, len);
-                return; // never the game's: an unknown opcode is its stage's to ignore, and ours is fully read here
-            }
-        }
+    if (peeked && g_routes.Dispatch(op, body, len, static_cast<CInPacket*>(pPacket), SkipOpcode)) {
+        return; // never the game's: an unknown opcode is its stage's to ignore, and ours is fully read here
     }
     CClientSocket__ProcessPacket(pThis, pPacket);
     if (peeked && op == kSetFieldOpcode) {
@@ -89,12 +83,31 @@ void __fastcall CClientSocket__ProcessPacket_hook(void* pThis, void* /*edx*/, vo
 
 namespace serverpackets {
 
-void OnRecv(unsigned short uOpcode, RecvHandler pHandler) {
-    if (g_uRoutes == sizeof(g_aRoutes) / sizeof(g_aRoutes[0])) {
-        log_line("too many server opcodes; one is not read");
+static void AddRoute(const serverroutes::Route& route) {
+    char line[96] = {};
+    switch (g_routes.Add(route)) {
+    case serverroutes::AddResult::added:
         return;
+    case serverroutes::AddResult::full:
+        sprintf_s(line, "too many server opcode routes; 0x%X is not read", route.uOpcode);
+        break;
+    case serverroutes::AddResult::taken:
+        sprintf_s(line, "two modules read opcode 0x%X; the second one is not called", route.uOpcode);
+        break;
     }
-    g_aRoutes[g_uRoutes++] = { uOpcode, pHandler };
+    log_line(line);
+}
+
+void OnRecv(unsigned short uOpcode, RecvHandler pHandler) {
+    AddRoute({ uOpcode, serverroutes::Kind::body, pHandler, nullptr });
+}
+
+void OnRecvPacket(unsigned short uOpcode, PacketHandler pHandler) {
+    AddRoute({ uOpcode, serverroutes::Kind::packet, nullptr, pHandler });
+}
+
+void OnRecvBefore(unsigned short uOpcode, RecvHandler pHandler) {
+    AddRoute({ uOpcode, serverroutes::Kind::before, pHandler, nullptr });
 }
 
 void OnSetField(FieldHandler pHandler) {

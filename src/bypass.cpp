@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "hook.h"
+#include "clientloop.h"
 #include "constants.h"
+#include "debug.h"
 #include "wvs/wvsapp.h"
 #include "wvs/wndman.h"
 #include "wvs/stage.h"
@@ -14,6 +16,36 @@
 
 #pragma comment(lib, "winmm.lib")
 #pragma warning(disable : 4996)
+
+
+namespace {
+
+clientloop::FrameHandler g_apOnFrame[16];
+size_t g_uOnFrame = 0;
+clientloop::MessageFilter g_apOnMessage[8];
+size_t g_uOnMessage = 0;
+
+}  // namespace
+
+namespace clientloop {
+
+void OnFrame(FrameHandler pHandler) {
+    if (g_uOnFrame == sizeof(g_apOnFrame) / sizeof(g_apOnFrame[0])) {
+        LogMessage("[client_loop] too many frame handlers; one is not called");
+        return;
+    }
+    g_apOnFrame[g_uOnFrame++] = pHandler;
+}
+
+void OnMessage(MessageFilter pFilter) {
+    if (g_uOnMessage == sizeof(g_apOnMessage) / sizeof(g_apOnMessage[0])) {
+        LogMessage("[client_loop] too many message filters; one is not called");
+        return;
+    }
+    g_apOnMessage[g_uOnMessage++] = pFilter;
+}
+
+}  // namespace clientloop
 
 
 class ZSocketBase {
@@ -223,6 +255,9 @@ void CWvsApp::SetUp_hook() {
 }
 
 void CWvsApp::CallUpdate_hook(int tCurTime) {
+    for (size_t i = 0; i < g_uOnFrame; ++i) {
+        g_apOnFrame[i]();
+    }
     if (m_bFirstUpdate) {
         m_tUpdateTime = tCurTime;
         m_bFirstUpdate = 0;
@@ -365,6 +400,11 @@ int CLogin::SendCheckPasswordPacket_hook(char* sID, char* sPasswd) {
 
 
 int CWndMan::TranslateMessage_hook(UINT& msg, WPARAM& wParam, LPARAM& lParam, LRESULT* plResult) {
+    for (size_t i = 0; i < g_uOnMessage; ++i) {
+        if (g_apOnMessage[i](msg, wParam, lParam, plResult)) {
+            return 1; // CWvsApp's window procedure returns *plResult (its call at 0x009FE921)
+        }
+    }
     if (msg == WM_MOUSEWHEEL) {
         // CWndMan::ProcessMouse(this, msg, wParam, lParam);
         *plResult = reinterpret_cast<LRESULT(__thiscall*)(CWndMan*, UINT, WPARAM, LPARAM)>(0x009E3AE6)(this, msg, wParam, lParam);
