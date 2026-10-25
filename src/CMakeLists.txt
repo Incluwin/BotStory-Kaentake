@@ -26,6 +26,7 @@ add_library(injector SHARED
     BossHP.cpp
     chronicle_extras.cpp
     enlargequickslot.cpp
+    movementkeys.cpp
     v83_version_guard.cpp
     shoulderslots.cpp
     iscorrectbodypart.cpp

@@ -64,6 +64,7 @@ void AttachFreeAddy();
 void AttachBossHPMod();
 void AttachChronicleExtras();
 void AttachEnlargeQuickslotMod();
+void AttachMovementKeysMod();
 void AttachShoulderSlotsFix();
 void AttachIsCorrectBodyPartFix();
 void AttachGetBodyPartFromItemFix();

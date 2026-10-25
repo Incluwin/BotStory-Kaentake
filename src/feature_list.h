@@ -65,6 +65,7 @@ enum class FeatureSection : int {
     X(boss_hp,                 "Boss HP % under the boss bar",           0, 0,                                      combat,   none,          1, AttachBossHPMod) \
     X(chronicle_extras,        "No exit ad, minimize button",            1, FEATURE_LIVE,                           ui,       none,          1, AttachChronicleExtras) \
     X(enlarge_quickslot,       "26-slot quickslot bar",                  1, 0,                                      ui,       resolution,    1, AttachEnlargeQuickslotMod) \
+    X(movement_keys,           "Bindable movement keys (e.g. WASD)",     1, 0,                                      ui,       none,          1, AttachMovementKeysMod) \
     X(shoulder_slots,          "Shoulder equip slot fix",                1, FEATURE_LIVE,                           fixes,    none,          1, AttachShoulderSlotsFix) \
     X(is_correct_body_part,    "Equip body part check fix",              1, FEATURE_LIVE,                           fixes,    none,          1, AttachIsCorrectBodyPartFix) \
     X(get_body_part_from_item, "Equip body part lookup fix",             1, FEATURE_LIVE,                           fixes,    none,          1, AttachGetBodyPartFromItemFix) \

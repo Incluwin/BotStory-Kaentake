@@ -2,6 +2,7 @@
 #include "hook.h"
 #include "features.h"
 #include "debug.h"
+#include "movementkeys.h"
 #include "wvs/wvsapp.h"
 #include "wvs/util.h"
 #include "ztl/ztl.h"
@@ -121,6 +122,10 @@ public:
         const wchar_t* sAbsUolC = static_cast<const wchar_t*>(sAbsUol);
         if (sAbsUolC && (wcsstr(sAbsUolC, L"StatusBar") || wcsstr(sAbsUolC, L"uickSlot"))) {
             diag_log("[ser] %ls\n", sAbsUolC);
+        }
+
+        if (features::IsAttached(FeatureId::movement_keys)) {
+            InjectMovementKeyIcons(this, sAbsUolC); // the arrow icons, when this is UI/UIWindow.img
         }
 
         bool bIsOverride = std::binary_search(g_vecOverrides.begin(), g_vecOverrides.end(), sAbsUol);

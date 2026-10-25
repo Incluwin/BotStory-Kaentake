@@ -97,6 +97,7 @@ Feature handshake below).
 | Interface | Custom item names and equip tooltips | `tool_tip` | on |
 | Interface | No exit ad, minimize button | `chronicle_extras` | on |
 | Interface | 26-slot quickslot bar | `enlarge_quickslot` | on |
+| Interface | Bindable movement keys (e.g. WASD) | `movement_keys` | on |
 | Interface | World map mob/NPC tooltips | `map_info_tool_tip` | on |
 | Combat display | Mob HP bar with numbers | `mob_hp_tag` | on |
 | Combat display | Buff and skill cooldown display | `temp_stat` | on |
