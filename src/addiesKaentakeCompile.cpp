@@ -157,12 +157,10 @@ void AttachFreeAddy() {
     Patch1(0x009516C2 + 3, 0xff);
     Patch1(0x009516C2 + 4, 0xff);
 
-    // No Whack (secondary site)
-    // 009698BC is a 6-byte "jnz rel32" (0F 85 disp32) to the skill shot at 0x00969A39.
-    // A lone 0xEB made "jmp short -0x7B" into the no-ammo fallback (CLOSE skill=0 for every ammo skill),
-    // so write nop + jmp rel32 and keep disp32: same target, now unconditional.
-    Patch1(0x009698BC, 0x90);
-    Patch1(0x009698BC + 1, 0xE9);
+    // No secondary site at 009698BC: the skill shot there runs the same close-range check
+    // (0x00950921 with a shoot-range pointer), so the patch above already stops its whack.
+    // Skipping that call also skipped its default shoot range (0x41), and Shadow Meso
+    // crashed the client shooting with range 0.
 
     // Hurricane / Rapid Fire no whack
     // Each site is a 6-byte "je rel32" (0F 84 disp32). Retarget disp32 from 0x0096AC43 -> 0x0096AEB5.
