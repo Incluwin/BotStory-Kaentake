@@ -5,3 +5,6 @@ build/
 test/*.exe
 test/*.obj
 b/
+test/*.dll
+test/*.lib
+test/*.exp

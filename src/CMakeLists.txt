@@ -1,6 +1,7 @@
 # Build injector
 add_library(injector SHARED
     injector.cpp
+    dllentry.cpp
     system.cpp
     bypass.cpp
     inlink.cpp
@@ -52,6 +53,9 @@ target_link_libraries(injector PRIVATE
     WzLib
     winhttp
 )
+
+# dllentry.cpp: no static destructors once the game has torn down at process exit
+target_link_options(injector PRIVATE "/ENTRY:KaentakeDllEntry")
 
 set_target_properties(injector PROPERTIES
     OUTPUT_NAME ${PROJECT_NAME}
