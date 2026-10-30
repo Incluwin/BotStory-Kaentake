@@ -486,4 +486,15 @@ void AttachClientBypass() {
     PatchRetZero(0x00422C7E); // ShowAdBalloon
     PatchRetZero(0x009F191B); // SendHSLog
     Patch1(0x00797074, 0xEB); // ZExceptionHandler::UnhandledExceptionFilter - fix process hang
+
+    // exit() -> doexit(code, quick, 0) runs the exe's static destructors, and they free the ZAllocEx pools behind
+    // ZtlTaskMemFree while NameSpace.dll's statics still hold strings from them: ExitProcess then detaches
+    // NameSpace.dll and its CRT frees into the gone pool (MapleStory.exe+0x31FE, TerminateProcess 0xC0000005 on
+    // every quit). quick=1 is _exit(): the destructors only free memory, which Windows does at exit anyway.
+    static const unsigned char kExit[] = {0x6A, 0x00, 0x6A, 0x00, 0xFF, 0x74, 0x24, 0x0C}; // push 0; push 0; push code
+    if (memcmp(reinterpret_cast<const void*>(0x00A637E2), kExit, sizeof(kExit)) == 0) {
+        Patch1(0x00A637E5, 0x01); // exit: quick = 1
+    } else {
+        LogMessage("[bypass] exit() at 0x00A637E2 is not the expected code; the exit path stays stock");
+    }
 }
