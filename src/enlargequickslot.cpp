@@ -18,13 +18,10 @@
 // at 0x008E069D, 0x008E06A3 (before the hook) and 0x008E099F+3 (after the
 // return point) are outside the hijacked span.
 //
-// KNOWN GAP: the original gist references a 5th code cave
-// `Restore_Array_Expanded` at 0x008CFDFD without defining it. Without the
-// body we can't install it; since cooldown_Array is initialized to 0xFF, the
-// common "skill cooldown resets properly" path still works. If you notice
-// stale cooldown overlays on the new slots after a skill lapses, this is the
-// missing piece -- would need a disassembly of the original 6 bytes at
-// 0x008CFDFD to reconstruct.
+// The original gist references a 5th code cave `Restore_Array_Expanded` at
+// 0x008CFDFD (in CUIStatusBar's destructor) without defining it. Its body is
+// written here (see Restore_Array_Expanded_cave): without it a second login in
+// the same process crashed the client whenever a skill sat on a quickslot.
 // ---------------------------------------------------------------------------
 #include "pch.h"
 #include "hook.h"
@@ -183,6 +180,10 @@ static unsigned char cooldown_Array[124] = {
     0xFF, 0xFF, 0xFF, 0xFF
 };
 
+// The records a fresh client starts with, copied at attach time, so every
+// status bar the game builds after the first one starts from them too.
+static unsigned char Array_Expanded_Init[sizeof(Array_Expanded)];
+
 
 // ============================================================================
 // Code caves (naked trampolines). Addresses & assembly taken verbatim from
@@ -271,6 +272,30 @@ __declspec(naked) static void DefaultQuickslotKeyMap_cave() {
         rep  movsd
         pop  edi
         pop  esi
+        ret
+    }
+}
+
+// CUIStatusBar::~CUIStatusBar. The stock bar keeps its 8 quickslot records in
+// the bar itself (this+0xD20), so they die with it. The 26 expanded records
+// live in the statics above and outlive it: after Quit Game the next login's
+// bar starts with the last session's records, and a skill record sends its
+// first DrawSkillCooltime into the skill branch before the new character
+// data exists (null CharacterData read at MapleStory+0xE86A3, client gone).
+static void __cdecl RestoreArrayExpanded() {
+    memcpy(Array_Expanded, Array_Expanded_Init, sizeof(Array_Expanded));
+    memset(cooldown_Array, 0xFF, sizeof(cooldown_Array));
+}
+
+__declspec(naked) static void Restore_Array_Expanded_cave() {
+    __asm {
+        pushfd
+        pushad
+        call RestoreArrayExpanded
+        popad
+        popfd
+        lea  eax, dword ptr ds:[esi + 0xD7C]    // the instruction the jmp replaced
+        push 0x8CFE03
         ret
     }
 }
@@ -390,7 +415,6 @@ void AttachEnlargeQuickslotMod() {
     CodeCave(0x009FA0DB, &sub_9FA0CB_cave,                        5);
     CodeCave(0x0072B7BC, &sDefaultQuickslotKeyMap_cave,           5);
     CodeCave(0x0072B8E6, &DefaultQuickslotKeyMap_cave,            5);
-    // NOTE: 5th cave Restore_Array_Expanded @ 0x008CFDFD is intentionally
-    //       omitted -- the gist declares it but never defines the body.
-    //       See the file header for behavioural impact (minor).
+    memcpy(Array_Expanded_Init, Array_Expanded, sizeof(Array_Expanded));
+    CodeCave(0x008CFDFD, &Restore_Array_Expanded_cave,            6);
 }
