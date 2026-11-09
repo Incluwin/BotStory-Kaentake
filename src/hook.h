@@ -75,6 +75,7 @@ void AttachServerPackets(); // serverpackets.cpp: the BotStory server's packets,
 void AttachCrewWindowMod();
 void AttachSetItemsMod();
 void AttachStorageBagMod();
+void AttachOwnHitMod();
 void CrewWindowOnConnect();
 void AttachFeatureHandshake();
 void FeatureHandshakeOnConnect();

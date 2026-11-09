@@ -42,6 +42,7 @@ add_library(injector SHARED
     crewwnd.cpp
     setitems.cpp
     storagebag.cpp
+    ownhit.cpp
 )
 
 target_precompile_headers(injector PRIVATE pch.h)

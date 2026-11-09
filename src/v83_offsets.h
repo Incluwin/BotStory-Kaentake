@@ -176,4 +176,39 @@ constexpr uintptr_t kGetAbsLeft         = 0x009E03C5;   // IUIMsgHandler::GetAbs
 constexpr uintptr_t kGetAbsTop          = 0x009E0447;   // IUIMsgHandler::GetAbsTop of a CWnd (its +4)
 }  // namespace bag
 
+// ---------------------------------------------------------------------------
+// Own hit numbers (ownhit.cpp): the number and hit sound over your own character for a hit the server applied
+// (S->C 0x189 PVP_HIT). Your client draws nothing for a DAMAGE_PLAYER about yourself (the server's
+// docs/PVP_V0_RESULTS.md, V0.1): CUserPool hands it to CUserRemote::OnHit, and you are not a remote user.
+// Read from the unpacked dump Kuro files/Kuro/Kuro.exe (same build) on 2026-11-09:
+//  - kUserShowHP is the one routine that draws a number over a CUser. CUserLocal::SetDamaged calls it at
+//    0x009593B2 with minus the HP it took, CUserRemote::OnHit at 0x0098360A with minus the decoded damage. The HP
+//    recovery ticks (0x0094B120, 0x0094B254, 0x0094B8A9) and CWvsContext::TryRecovery (0x00A03117) call it with the
+//    gain. n > 0: CAnimationDisplayer::Effect_HP (0x00437D0F, 5 args) (x, top, n, 1, 0), a heal number;
+//    n < 0: Effect_HP(x, top, -n, 2, 0), the violet digits of a hit; n == 0: Effect_Miss (0x00438A21)(x, top, 2).
+//    It reads only the user's position (+4, vtable slot 0x10) and avatar (+0x88); __thiscall, ret 4.
+//  - kUserLocalInstance is TSingleton<CUserLocal>::ms_pInstance. The ctor 0x00948BA2 stores this (0x00948BD7), the
+//    dtor 0x009491CD clears it (0x009494F9), so it is 0 between fields. play_sound_volume 0x009894F3 reads it the same
+//    way (+4: the position).
+//  - kAnimationDisplayer is TSingleton<CAnimationDisplayer>::ms_pInstance (its ctor stores it at 0x0043546D).
+//    kUserShowHP uses it as Effect_HP's this without a check.
+//  - kPlayMobSound is play_mob_sound(templateId, type, volume), cdecl. It builds "Sound/Mob.img/%07d/%s" (StringPool
+//    0x895), names from a 39-case table at 0x0098A238 (11 CharDam1, 12 CharDam2, 19 CharDamF; 13-18 play nothing),
+//    and calls CSoundMan::PlaySE (0x0043FB25, which catches a missing sound). SetDamaged plays it at 0x009591C2 with
+//    type nAttackIdx + 11, at the distance volume of the hit point on your own body (100).
+//  - kPlaySkillSound is play_skill_sound(skillId, type), cdecl, volume 100. It builds "Sound/Skill.img/%07d/%s"
+//    (StringPool 0x894); type 49 is "Hit" (case 0x0098988B of the table at 0x0098997B, which starts at 42 "Use").
+// SetDamaged itself (0x009581A9, virtual, ret 0x28) is not called: it also knocks you back (0x007A6353), starts the
+// hit invincibility, takes the HP and sends TAKE_DAMAGE (COutPacket 0x30). The server has already applied the hit.
+namespace ownhit {
+constexpr unsigned short kRecvOpcode = 0x189;         // server -> client PVP_HIT (server SendOpcode.PVP_HIT)
+constexpr uintptr_t kUserLocalInstance  = 0x00BEBF98;  // TSingleton<CUserLocal>::ms_pInstance (a CUser*)
+constexpr uintptr_t kAnimationDisplayer = 0x00BEBF6C;  // TSingleton<CAnimationDisplayer>::ms_pInstance
+constexpr uintptr_t kUserShowHP         = 0x0092EC50;  // CUser's HP number: (this, int n) as above
+constexpr uintptr_t kPlayMobSound       = 0x00989BA1;  // play_mob_sound(int templateId, int type, int volume)
+constexpr uintptr_t kPlaySkillSound     = 0x00989729;  // play_skill_sound(int skillId, int type)
+constexpr int kSkillSoundHit = 49;                     // play_skill_sound's "Hit" (mob types: ownhitproto.h)
+constexpr int kOwnVolume = 100;                        // play_sound_volume on your own position
+}  // namespace ownhit
+
 }  // namespace v83
