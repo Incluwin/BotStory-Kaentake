@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "paths.h"
 #include "hook.h"
 #include "features.h"
 #include "debug.h"
@@ -17,7 +18,7 @@
 // Used to verify which WZ paths are flowing through our hooks at runtime.
 static void diag_log(const char* fmt, ...) {
     FILE* fp = nullptr;
-    if (fopen_s(&fp, "kaentake_diag.txt", "a") != 0 || !fp) {
+    if (fopen_s(&fp, kpaths::LogPath(), "a") != 0 || !fp) {
         return;
     }
     va_list ap;

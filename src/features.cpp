@@ -8,6 +8,7 @@
 //   inert=a,b   server vetoes kept for this start (the feature handshake writes them): a LIVE module here attaches
 //               but starts inert, any other one does not attach
 #include "pch.h"
+#include "paths.h"
 #include "features.h"
 #include "hook.h"
 #include "debug.h"
@@ -101,7 +102,7 @@ std::string GameDir() {
 
 // config.ini next to MapleStory.exe (the working directory is not always the game folder)
 std::string ConfigPath() {
-    return GameDir() + "\\" CONSTANTS_CONFIG_NAME;
+    return kpaths::ConfigPath();
 }
 
 void Log(const char* sFormat, ...) {
@@ -124,7 +125,7 @@ void Diag(const char* sFormat, ...) {
     StringCbVPrintfA(buf, sizeof(buf), sFormat, ap);
     va_end(ap);
     FILE* fp = nullptr;
-    if (fopen_s(&fp, "kaentake_diag.txt", "a") == 0 && fp) {
+    if (fopen_s(&fp, kpaths::LogPath(), "a") == 0 && fp) {
         fprintf(fp, "[features] %s\n", buf);
         fclose(fp);
     }

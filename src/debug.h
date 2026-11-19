@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 
 #ifdef _DEBUG
 #define DEBUG_MESSAGE(FORMAT, ...) DebugMessage(FORMAT, __VA_ARGS__)
@@ -9,7 +10,11 @@
 
 void DebugMessage(const char* sFormat, ...);
 
+// A message box titled "BotStory" that also names kaentake_diag.txt and its folder; the text is logged there too.
 void ErrorMessage(const char* sFormat, ...);
+
+// Appends "Details are saved in kaentake_diag.txt in this folder: <folder>" to a message box's text.
+void AppendLogFileHint(char* sDest, size_t cbDest);
 
 // One line appended to kaentake_diag.txt (beside the other modules' lines), in Release builds too; DEBUG_MESSAGE
 // compiles away there. Start the line with the module's "[id]" like the rest of the file.

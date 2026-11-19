@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "paths.h"
 #include "hook.h"
 #include "features.h"
 #include "constants.h"
@@ -33,11 +34,11 @@ void ProcessConfigFile() {
         return;
     }
     char sBuffer[1024];
-    if (GetPrivateProfileStringA("config", "host", "", sBuffer, sizeof(sBuffer), ".\\" CONSTANTS_CONFIG_NAME) == 0) {
+    if (GetPrivateProfileStringA("config", "host", "", sBuffer, sizeof(sBuffer), kpaths::ConfigPath()) == 0) {
         return;
     }
     g_sServerHost = _strdup(sBuffer);
-    if (GetPrivateProfileStringA("config", "port", "", sBuffer, sizeof(sBuffer), ".\\" CONSTANTS_CONFIG_NAME) == 0) {
+    if (GetPrivateProfileStringA("config", "port", "", sBuffer, sizeof(sBuffer), kpaths::ConfigPath()) == 0) {
         return;
     }
     g_nServerPort = atoi(sBuffer);

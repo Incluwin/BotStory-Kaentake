@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "paths.h"
 #include "hook.h"
 #include "serverpackets.h"
 #include "v83_offsets.h"
@@ -20,7 +21,7 @@ size_t g_uOnSetField = 0;
 
 void log_line(const char* s) {
     FILE* fp = nullptr;
-    if (fopen_s(&fp, "kaentake_diag.txt", "a") == 0 && fp) {
+    if (fopen_s(&fp, kpaths::LogPath(), "a") == 0 && fp) {
         fprintf(fp, "[server_packets] %s\n", s);
         fclose(fp);
     }

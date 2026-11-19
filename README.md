@@ -68,6 +68,14 @@ resolution=1600x900
   manifest's WZ files and download from `<patch_url>/bases/cosmic/`. If the
   server has no such manifest the launcher asks before playing with the
   current files; it never falls back to the Repack WZ files.
+- `crew_hotkey` — optional, the key that opens the Crew window: exactly one
+  letter or digit (default `U`). Anything else is logged to
+  `kaentake_diag.txt` and `U` is used. The key does nothing while it is set
+  to something in the game's own key settings (also logged). The window
+  remembers where it was closed in a `[crew]` section (`x=`, `y=`).
+- `config.ini` and `kaentake_diag.txt` are always the ones beside the exe
+  (`Launch Game.exe` / `MapleStory.exe`), whatever folder a shortcut starts
+  in. A value that is not valid is logged there with what was used instead.
 - `resolution` — optional preferred launch resolution. Accepts either a
   `WxH` shorthand (`800x600`, `1024x768`, `1366x768`, `1600x900`,
   `1920x1080`) or a direct index (`0`–`4`). When set, it overrides the
@@ -161,9 +169,12 @@ side: BotStory Server `docs/CLIENT_FEATURE_HANDSHAKE.md`.
 
 **Features page.** The launcher opens a window with one checkbox per
 switchable module before it patches and starts the game. Play saves and
-starts the game, Save saves and exits, Cancel exits. It writes every
+starts the game, Save saves and keeps the page open, Cancel (or the window's
+X) exits and asks first if there are unsaved changes. A module named in
+`inert=` shows as "(off on this server)", greyed out; its own line is saved
+unchanged. It writes every
 switchable module's line to `[features]` and leaves the other keys alone.
-Its last checkbox, "Show this page when the game starts", is saved as
+Its last checkbox, "Show this page every time", is saved as
 `page_at_launch` (default `1`); with `page_at_launch=0` the launcher goes
 straight to the game, and `Launch Game.exe --features` or holding Shift
 while it starts opens the page anyway.

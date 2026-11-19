@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "paths.h"
 #include "hook.h"
 #include "v83_offsets.h"
 #include "wvs/util.h"
@@ -36,7 +37,7 @@ static bool g_bResidentFontFailed = false;
 
 static void qc_log(const char* fmt, ...) {
     FILE* fp = nullptr;
-    if (fopen_s(&fp, "kaentake_diag.txt", "a") != 0 || !fp) {
+    if (fopen_s(&fp, kpaths::LogPath(), "a") != 0 || !fp) {
         return;
     }
     va_list ap;

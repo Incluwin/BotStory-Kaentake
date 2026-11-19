@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "hook.h"
 #include "debug.h"
+#include "paths.h"
 #include "features.h"
 #include "ownhitproto.h"
 #include "serverpackets.h"
@@ -138,13 +139,7 @@ void OnDamagePlayerProbe(const unsigned char* pBody, size_t uLength) {
 void AttachOwnHitMod() {
     serverpackets::OnRecv(kRecvOpcode, &OnPvpHit);
 #ifdef KAENTAKE_OWN_HIT_PROBE
-    char sPath[MAX_PATH] = {};
-    DWORD n = GetModuleFileNameA(nullptr, sPath, MAX_PATH);
-    while (n > 0 && sPath[n - 1] != '\\' && sPath[n - 1] != '/') {
-        --n;
-    }
-    strcpy_s(sPath + n, MAX_PATH - n, "config.ini"); // beside MapleStory.exe, as the other modules read it
-    g_uProbeCid = GetPrivateProfileIntA("own_hit", "probe_cid", 0, sPath);
+    g_uProbeCid = GetPrivateProfileIntA("own_hit", "probe_cid", 0, kpaths::ConfigPath()); // beside MapleStory.exe
     LogMessage("[own_hit] PROBE BUILD: DAMAGE_PLAYER about cid %u is drawn as an own hit", g_uProbeCid);
     serverpackets::OnRecvBefore(0xC0, &OnDamagePlayerProbe);
 #endif
