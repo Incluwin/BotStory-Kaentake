@@ -1,8 +1,11 @@
 #include "featurespage.h"
 #include "constants.h"
+#include "debug.h"
 #include "feature_list.h"
+#include "paths.h"
 
 #include <windows.h>
+#include <strsafe.h>
 #include <string>
 
 
@@ -56,20 +59,35 @@ HFONT g_hFont = nullptr;
 HFONT g_hHeadingFont = nullptr;
 HWND g_aBox[kRowCount] = {};
 HWND g_hAtLaunch = nullptr;
+HWND g_hStatus = nullptr;
 bool g_bPlay = false;
 bool g_bDone = false;
 
+// A module the server turned off at the last login (config.ini [features] inert=, written by the feature handshake).
+// Its box shows it off and greyed; the player's own switch is kept in g_aStored and saved unchanged.
+bool g_aVetoed[kRowCount] = {};
+bool g_aStored[kRowCount] = {};
+// What config.ini holds now, to tell whether there are unsaved changes.
+bool g_aSaved[kRowCount] = {};
+bool g_bSavedAtLaunch = true;
 
-std::string ExeDir() {
-    char path[MAX_PATH] = {};
-    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    std::string s(path, n);
-    size_t slash = s.find_last_of("\\/");
-    return slash == std::string::npos ? std::string(".") : s.substr(0, slash);
-}
 
 std::string ConfigPath() {
-    return ExeDir() + "\\" CONSTANTS_CONFIG_NAME;
+    return kpaths::ConfigPath();
+}
+
+bool InInertList(const char* sId) {
+    char buf[512];
+    if (GetPrivateProfileStringA("features", "inert", "", buf, sizeof(buf), g_sConfig.c_str()) == 0) {
+        return false;
+    }
+    char* pContext = nullptr;
+    for (char* s = strtok_s(buf, ", \t", &pContext); s; s = strtok_s(nullptr, ", \t", &pContext)) {
+        if (_stricmp(s, sId) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 int RowIndex(const char* sId) {
@@ -85,25 +103,88 @@ bool IsChecked(HWND hBox) {
     return SendMessageA(hBox, BM_GETCHECK, 0, 0) == BST_CHECKED;
 }
 
+// The player's switch for a row: the box, or for a row the server turned off, the value kept from config.ini.
+bool SwitchOn(int i) {
+    return g_aVetoed[i] ? g_aStored[i] : IsChecked(g_aBox[i]);
+}
+
 // A module whose required module is unchecked cannot attach: its box is greyed out until the other one is on.
 void UpdateRequirements() {
     for (int i = 0; i < kRowCount; ++i) {
+        if (!g_aBox[i] || g_aVetoed[i]) {
+            continue;
+        }
         int nRequired = RowIndex(kRows[i].sRequires);
-        if (g_aBox[i] && nRequired >= 0 && g_aBox[nRequired]) {
-            EnableWindow(g_aBox[i], IsChecked(g_aBox[nRequired]));
+        if (nRequired >= 0 && g_aBox[nRequired]) {
+            EnableWindow(g_aBox[i], SwitchOn(nRequired));
         }
     }
 }
 
+void SetStatus(const char* sText) {
+    if (g_hStatus) {
+        SetWindowTextA(g_hStatus, sText);
+    }
+}
+
+bool IsDirty() {
+    for (int i = 0; i < kRowCount; ++i) {
+        if (g_aBox[i] && SwitchOn(i) != g_aSaved[i]) {
+            return true;
+        }
+    }
+    return g_hAtLaunch && IsChecked(g_hAtLaunch) != g_bSavedAtLaunch;
+}
+
+void UpdateStatus() {
+    SetStatus(IsDirty() ? "Changes not saved yet." : "");
+}
+
 bool Save() {
     for (int i = 0; i < kRowCount; ++i) {
-        if (g_aBox[i] && !WritePrivateProfileStringA("features", kRows[i].id, IsChecked(g_aBox[i]) ? "1" : "0",
+        if (g_aBox[i] && !WritePrivateProfileStringA("features", kRows[i].id, SwitchOn(i) ? "1" : "0",
                                                      g_sConfig.c_str())) {
             return false;
         }
     }
-    return !g_hAtLaunch || WritePrivateProfileStringA("features", kAtLaunchKey, IsChecked(g_hAtLaunch) ? "1" : "0",
-                                                      g_sConfig.c_str());
+    if (g_hAtLaunch && !WritePrivateProfileStringA("features", kAtLaunchKey, IsChecked(g_hAtLaunch) ? "1" : "0",
+                                                   g_sConfig.c_str())) {
+        return false;
+    }
+    for (int i = 0; i < kRowCount; ++i) {
+        if (g_aBox[i]) {
+            g_aSaved[i] = SwitchOn(i);
+        }
+    }
+    g_bSavedAtLaunch = !g_hAtLaunch || IsChecked(g_hAtLaunch);
+    return true;
+}
+
+void ShowSaveError(HWND hWnd) {
+    LogMessage("[features_page] could not write %s (error %lu)", g_sConfig.c_str(), GetLastError());
+    char msg[1024];
+    StringCbPrintfA(msg, sizeof(msg),
+                    "Your choices could not be saved to config.ini. Is the game folder read-only?\n\n%s",
+                    g_sConfig.c_str());
+    AppendLogFileHint(msg, sizeof(msg));
+    MessageBoxA(hWnd, msg, "BotStory", MB_ICONERROR);
+}
+
+// Closing (Cancel or the window's X): asks first when there are unsaved changes. False keeps the page open.
+bool ConfirmClose(HWND hWnd) {
+    if (!IsDirty()) {
+        return true;
+    }
+    int r = MessageBoxA(hWnd, "You changed some switches but did not save them.\n\nSave them before closing?",
+                        "BotStory", MB_YESNOCANCEL | MB_ICONQUESTION);
+    if (r == IDCANCEL) {
+        return false;
+    }
+    if (r == IDYES && !Save()) {
+        ShowSaveError(hWnd);
+        return false;
+    }
+    return true;
 }
 
 HWND AddControl(HWND hParent, const char* sClass, const char* sText, DWORD dwStyle, int x, int y, int w, int h, int nId) {
@@ -176,10 +257,19 @@ void CreateControls(HWND hWnd) {
             if (r.nFlags & FEATURE_SERVER_GATED) {
                 sLabel += " *";
             }
+            g_aStored[i] = ReadFeatureSwitch(g_sConfig.c_str(), r.id, r.bDefault);
+            g_aSaved[i] = g_aStored[i];
+            g_aVetoed[i] = InInertList(r.id);
+            if (g_aVetoed[i]) {
+                sLabel += " (off on this server)";
+            }
             g_aBox[i] = AddControl(hWnd, "BUTTON", sLabel.c_str(), BS_AUTOCHECKBOX | WS_TABSTOP,
                                    kMargin + kIndent + nColumn * kColumnWidth, y + nLine * kRowHeight,
                                    kColumnWidth - kGap - kIndent, kRowHeight, kIdFirstBox + i);
-            SendMessageA(g_aBox[i], BM_SETCHECK, ReadFeatureSwitch(g_sConfig.c_str(), r.id, r.bDefault) ? BST_CHECKED : BST_UNCHECKED, 0);
+            SendMessageA(g_aBox[i], BM_SETCHECK, g_aStored[i] && !g_aVetoed[i] ? BST_CHECKED : BST_UNCHECKED, 0);
+            if (g_aVetoed[i]) {
+                EnableWindow(g_aBox[i], FALSE);
+            }
         }
         y += nLines * kRowHeight + kGap;
     }
@@ -188,13 +278,17 @@ void CreateControls(HWND hWnd) {
                SS_LEFT, kMargin, y, kColumnWidth * 2, kTextHeight, -1);
     y += kTextHeight + kGap;
 
-    g_hAtLaunch = AddControl(hWnd, "BUTTON", "Show this page when the game starts (hold Shift to open it when off)",
+    g_hAtLaunch = AddControl(hWnd, "BUTTON", "Show this page every time (hold Shift while starting to see it anyway)",
                              BS_AUTOCHECKBOX | WS_TABSTOP, kMargin, y, kColumnWidth * 2, kRowHeight, kIdAtLaunch);
-    SendMessageA(g_hAtLaunch, BM_SETCHECK, FeaturesPageAtLaunch() ? BST_CHECKED : BST_UNCHECKED, 0);
+    g_bSavedAtLaunch = FeaturesPageAtLaunch();
+    SendMessageA(g_hAtLaunch, BM_SETCHECK, g_bSavedAtLaunch ? BST_CHECKED : BST_UNCHECKED, 0);
     y += kRowHeight + kGap;
 
     AddControl(hWnd, "BUTTON", "Defaults", BS_PUSHBUTTON | WS_TABSTOP, kMargin, y, kButtonWidth, kButtonHeight, kIdDefaults);
     int x = ClientWidth() - kMargin - kButtonWidth * 3 - kGap * 2;
+    int nStatusX = kMargin + kButtonWidth + kGap;
+    g_hStatus = AddControl(hWnd, "STATIC", "", SS_LEFT | SS_CENTERIMAGE, nStatusX, y, x - kGap - nStatusX,
+                           kButtonHeight, -1);
     AddControl(hWnd, "BUTTON", "Play", BS_DEFPUSHBUTTON | WS_TABSTOP, x, y, kButtonWidth, kButtonHeight, IDOK);
     AddControl(hWnd, "BUTTON", "Save", BS_PUSHBUTTON | WS_TABSTOP, x + kButtonWidth + kGap, y, kButtonWidth,
                kButtonHeight, kIdSave);
@@ -210,37 +304,47 @@ LRESULT CALLBACK FeaturesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         return 0;
     case WM_COMMAND: {
         int nId = LOWORD(wParam);
-        if (nId >= kIdFirstBox && nId < kIdFirstBox + kRowCount) {
+        if ((nId >= kIdFirstBox && nId < kIdFirstBox + kRowCount) || nId == kIdAtLaunch) {
             UpdateRequirements();
+            UpdateStatus();
             return 0;
         }
         if (nId == kIdDefaults) {
             for (int i = 0; i < kRowCount; ++i) {
-                if (g_aBox[i]) {
+                if (g_aBox[i] && !g_aVetoed[i]) {
                     SendMessageA(g_aBox[i], BM_SETCHECK, kRows[i].bDefault ? BST_CHECKED : BST_UNCHECKED, 0);
                 }
             }
             SendMessageA(g_hAtLaunch, BM_SETCHECK, BST_CHECKED, 0);
             UpdateRequirements();
+            UpdateStatus();
             return 0;
         }
         if (nId == IDOK || nId == kIdSave) {
             if (!Save()) {
-                MessageBoxA(hWnd, ("Could not write " + g_sConfig).c_str(), "BotStory Features", MB_ICONERROR);
+                ShowSaveError(hWnd);
                 return 0;
             }
-            g_bPlay = nId == IDOK;
+            if (nId == kIdSave) { // stays open: Play starts the game, Cancel or X closes
+                SetStatus("Saved. Changes apply when the game starts.");
+                return 0;
+            }
+            g_bPlay = true;
             DestroyWindow(hWnd);
             return 0;
         }
         if (nId == IDCANCEL) {
-            DestroyWindow(hWnd);
+            if (ConfirmClose(hWnd)) {
+                DestroyWindow(hWnd);
+            }
             return 0;
         }
         break;
     }
     case WM_CLOSE:
-        DestroyWindow(hWnd);
+        if (ConfirmClose(hWnd)) {
+            DestroyWindow(hWnd);
+        }
         return 0;
     case WM_DESTROY:
         g_bDone = true; // no WM_QUIT: the launcher goes on after the page

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "paths.h"
 #include "hook.h"
 #include "features.h"
 #include "featureproto.h"
@@ -29,7 +30,7 @@ std::vector<std::string> g_allowed; // the modules this connection's last POLICY
 
 void hs_log(const char* fmt, ...) {
     FILE* fp = nullptr;
-    if (fopen_s(&fp, "kaentake_diag.txt", "a") != 0 || !fp) {
+    if (fopen_s(&fp, kpaths::LogPath(), "a") != 0 || !fp) {
         return;
     }
     fputs("[handshake] ", fp);

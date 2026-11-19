@@ -94,24 +94,37 @@ constexpr FeatureAlias kFeatureAliases[] = {
 #include <cstdlib>
 #include <cstring>
 
+// A switch value: a number (0 = off, anything else on), on/off, true/false or yes/no. 1 on, 0 off, -1 unreadable.
+inline int ParseFeatureSwitch(const char* sValue) {
+    if (sValue[0] >= '0' && sValue[0] <= '9') {
+        return atoi(sValue) != 0 ? 1 : 0;
+    }
+    if (!_stricmp(sValue, "on") || !_stricmp(sValue, "true") || !_stricmp(sValue, "yes")) {
+        return 1;
+    }
+    if (!_stricmp(sValue, "off") || !_stricmp(sValue, "false") || !_stricmp(sValue, "no")) {
+        return 0;
+    }
+    return -1;
+}
+
 // config.ini [features] <id>=1|0 (also on/off, true/false, yes/no). A missing or unreadable line falls back to an
-// alias key, then to the module's default. Shared with the launcher so both read a switch the same way.
+// alias key (read by the same rules), then to the module's default. Shared with the launcher so both read a switch
+// the same way.
 inline bool ReadFeatureSwitch(const char* sConfigPath, const char* sId, bool bDefault) {
     char buf[16];
     if (GetPrivateProfileStringA("features", sId, "", buf, sizeof(buf), sConfigPath) > 0) {
-        if (buf[0] >= '0' && buf[0] <= '9') {
-            return atoi(buf) != 0;
-        }
-        if (!_stricmp(buf, "on") || !_stricmp(buf, "true") || !_stricmp(buf, "yes")) {
-            return true;
-        }
-        if (!_stricmp(buf, "off") || !_stricmp(buf, "false") || !_stricmp(buf, "no")) {
-            return false;
+        int nValue = ParseFeatureSwitch(buf);
+        if (nValue >= 0) {
+            return nValue != 0;
         }
     }
     for (const auto& a : kFeatureAliases) {
         if (strcmp(a.id, sId) == 0 && GetPrivateProfileStringA(a.section, a.key, "", buf, sizeof(buf), sConfigPath) > 0) {
-            return atoi(buf) != 0; // what GetPrivateProfileIntA made of the old key
+            int nValue = ParseFeatureSwitch(buf);
+            if (nValue >= 0) {
+                return nValue != 0;
+            }
         }
     }
     return bDefault;

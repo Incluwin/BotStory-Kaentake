@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "paths.h"
 #include "patcher.h"
 #include "debug.h"
 #include "constants.h"
@@ -80,6 +81,7 @@ void DetachConsole() {
     g_console_attached = false;
 }
 
+// A plain sentence for the player in the patcher console, also kept in kaentake_diag.txt.
 void Log(const char* fmt, ...) {
     EnsureConsole();
     char buf[1024];
@@ -90,7 +92,25 @@ void Log(const char* fmt, ...) {
     fputs(buf, stdout);
     fputc('\n', stdout);
     fflush(stdout);
-    OutputDebugStringA(buf);
+    LogMessage("[patcher] %s", buf);
+}
+
+// A technical line (status codes, paths, hashes) for the host: kaentake_diag.txt only, never the console.
+void Detail(const char* fmt, ...) {
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    StringCbVPrintfA(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    LogMessage("[patcher] %s", buf);
+}
+
+// A message box under the title BotStory that names the log file and its folder.
+int Ask(const char* msg, UINT type) {
+    char text[2048];
+    StringCbCopyA(text, sizeof(text), msg);
+    AppendLogFileHint(text, sizeof(text));
+    return MessageBoxA(nullptr, text, "BotStory", type);
 }
 
 std::wstring Widen(const std::string& s) {
@@ -107,7 +127,7 @@ bool ReadPatchUrlFromConfig(std::string& out) {
     char buf[1024];
     DWORD n = GetPrivateProfileStringA(
         "config", "patch_url", "",
-        buf, sizeof(buf), ".\\" CONSTANTS_CONFIG_NAME);
+        buf, sizeof(buf), kpaths::ConfigPath());
     if (n == 0) return false;
     while (n > 0 && (buf[n-1] == '/' || buf[n-1] == '\\')) buf[--n] = '\0';
     out.assign(buf, n);
@@ -123,7 +143,7 @@ bool ReadBaseFromConfig(std::string& out) {
     char buf[64];
     DWORD n = GetPrivateProfileStringA(
         "config", "base", "",
-        buf, sizeof(buf), ".\\" CONSTANTS_CONFIG_NAME);
+        buf, sizeof(buf), kpaths::ConfigPath());
     out.clear();
     for (DWORD i = 0; i < n; ++i) {
         char c = buf[i];
@@ -279,7 +299,7 @@ bool HttpGetBytes(const ParsedUrl& base, const std::wstring& full_path,
     int64_t content_length = -1;
     if (!HttpSendAndRecv(request.get(), status, content_length)) return false;
     if (status != 200) {
-        Log("  http %lu for %ls", status, full_path.c_str());
+        Detail("http %lu for %ls", status, full_path.c_str());
         return false;
     }
 
@@ -310,7 +330,7 @@ bool HttpDownloadToFile(const ParsedUrl& base, const std::wstring& full_path,
     int64_t content_length = -1;
     if (!HttpSendAndRecv(request.get(), status, content_length)) return false;
     if (status != 200) {
-        Log("  http %lu downloading %s", status, dest_path.c_str());
+        Detail("http %lu downloading %s", status, dest_path.c_str());
         return false;
     }
 
@@ -318,7 +338,8 @@ bool HttpDownloadToFile(const ParsedUrl& base, const std::wstring& full_path,
     HANDLE fh = CreateFileA(tmp.c_str(), GENERIC_WRITE, 0, nullptr,
                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (fh == INVALID_HANDLE_VALUE) {
-        Log("  could not create %s (err %lu)", tmp.c_str(), GetLastError());
+        Detail("could not create %s (err %lu)", tmp.c_str(), GetLastError());
+        Log("  Could not save the file. Is the game folder read-only, or is the game still running?");
         return false;
     }
 
@@ -336,7 +357,8 @@ bool HttpDownloadToFile(const ParsedUrl& base, const std::wstring& full_path,
         if (read == 0) break;
         DWORD written = 0;
         if (!WriteFile(fh, buf.data(), read, &written, nullptr) || written != read) {
-            Log("  write failed on %s (err %lu)", tmp.c_str(), GetLastError());
+            Detail("write failed on %s (err %lu)", tmp.c_str(), GetLastError());
+            Log("  Could not write the file. Is the disk full?");
             ok = false;
             break;
         }
@@ -349,7 +371,7 @@ bool HttpDownloadToFile(const ParsedUrl& base, const std::wstring& full_path,
                 double pct = 100.0 * (double)received / (double)expected_size;
                 double mib = received / (1024.0 * 1024.0);
                 double total_mib = expected_size / (1024.0 * 1024.0);
-                fprintf(stdout, "\r    %.1f / %.1f MiB  (%.0f%%)      ",
+                fprintf(stdout, "\r    %.1f of %.1f MB downloaded (%.0f%%)      ",
                         mib, total_mib, pct);
                 fflush(stdout);
             }
@@ -362,7 +384,7 @@ bool HttpDownloadToFile(const ParsedUrl& base, const std::wstring& full_path,
         return false;
     }
     if (expected_size > 0 && received != expected_size) {
-        Log("  size mismatch: got %llu expected %llu",
+        Detail("size mismatch: got %llu expected %llu",
             (unsigned long long)received, (unsigned long long)expected_size);
         DeleteFileA(tmp.c_str());
         return false;
@@ -450,7 +472,7 @@ bool ParseManifest(const std::vector<uint8_t>& body, std::vector<ManifestEntry>&
         if (e.path.size() >= 2 && e.path[1] == ':') bad = true;
         if (e.path.find("..") != std::string::npos) bad = true;
         if (bad) {
-            Log("  skipping unsafe manifest path: %s", e.path.c_str());
+            Detail("skipping unsafe manifest path: %s", e.path.c_str());
             continue;
         }
         out.push_back(std::move(e));
@@ -590,7 +612,7 @@ bool SaveCache(const CacheMap& cache) {
 // --- orchestration ---
 
 bool ProcessEntry(const ParsedUrl& base, const ManifestEntry& e,
-                  CacheMap& cache, int& updated) {
+                  CacheMap& cache, int& updated, int index, int total) {
     std::string local = ".\\" + e.path;
     for (char& c : local) if (c == '/') c = '\\';
 
@@ -619,40 +641,47 @@ bool ProcessEntry(const ParsedUrl& base, const ManifestEntry& e,
                     cache[e.path] = {cur_size, cur_mtime, e.sha256};
                 }
             } else {
-                Log("  could not hash %s, re-downloading", local.c_str());
+                Detail("could not hash %s, re-downloading", local.c_str());
             }
         }
     }
 
     if (up_to_date) return true;
 
-    Log("updating %s (%.1f MiB)", e.path.c_str(), e.size / (1024.0 * 1024.0));
+    if (!g_console_attached) {
+        Log("Updating your game files. This can take a few minutes; the game starts when it is done.");
+    }
+    Log("Downloading %s (%.1f MB) - file %d of %d", e.path.c_str(), e.size / (1024.0 * 1024.0), index, total);
 
     std::wstring url_path = JoinPath(base.path, UrlEncodePath(e.source + e.path));
     EnsureDirForFile(local);
 
     for (int attempt = 1; attempt <= 2; ++attempt) {
         if (!HttpDownloadToFile(base, url_path, local, e.size)) {
-            Log("  download failed (attempt %d)", attempt);
+            Detail("download failed (attempt %d): %s", attempt, e.path.c_str());
+            Log(attempt < 2 ? "  The download did not finish. Trying again..." : "  The download did not finish.");
             if (attempt == 2) return false;
             continue;
         }
         std::string tmp = local + ".new";
         std::string got;
         if (!Sha256File(tmp, got)) {
-            Log("  hash failed on %s", tmp.c_str());
+            Detail("hash failed on %s", tmp.c_str());
+            Log(attempt < 2 ? "  Could not check the downloaded file. Trying again..." : "  Could not check the downloaded file.");
             DeleteFileA(tmp.c_str());
             if (attempt == 2) return false;
             continue;
         }
         if (got != e.sha256) {
-            Log("  hash mismatch (attempt %d): got %s", attempt, got.c_str());
+            Detail("hash mismatch (attempt %d) on %s: got %s", attempt, e.path.c_str(), got.c_str());
+            Log(attempt < 2 ? "  The downloaded file was damaged. Trying again..." : "  The downloaded file was damaged.");
             DeleteFileA(tmp.c_str());
             if (attempt == 2) return false;
             continue;
         }
         if (!MoveFileExA(tmp.c_str(), local.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-            Log("  rename failed: %s -> %s (err %lu)",
+            Log("  Could not replace %s. Close the game if it is still running.", e.path.c_str());
+            Detail("rename failed: %s -> %s (err %lu)",
                 tmp.c_str(), local.c_str(), GetLastError());
             DeleteFileA(tmp.c_str());
             return false;
@@ -669,9 +698,70 @@ bool ProcessEntry(const ParsedUrl& base, const ManifestEntry& e,
     return false;
 }
 
-bool AskContinue(const char* title, const char* msg) {
-    int r = MessageBoxA(nullptr, msg, title, MB_YESNO | MB_ICONWARNING);
-    return r == IDYES;
+// The game cannot start without its own files: a first install that has not downloaded them yet, or one whose files
+// were deleted. Then "play with your current files" would only fail later, so only Retry and Quit are offered.
+bool GameFilesMissing() {
+    return GetFileAttributesA(".\\MapleStory.exe") == INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesA(".\\Base.wz") == INVALID_FILE_ATTRIBUTES;
+}
+
+enum class Choice { Play, Retry, Quit };
+
+// The patch server could not be used. With the game's files in place: play with them or quit. On a first run: retry
+// or quit, since the first download needs the server.
+Choice AskAfterServerProblem(const char* problem) {
+    char msg[1024];
+    if (GameFilesMissing()) {
+        StringCbPrintfA(msg, sizeof(msg),
+            "%s\n\n"
+            "The game's files are not downloaded yet, and the first download needs the host's update "
+            "server to be reachable.\n\n"
+            "Check your internet connection and click Retry, or Cancel to quit.", problem);
+        return Ask(msg, MB_RETRYCANCEL | MB_ICONWARNING) == IDRETRY ? Choice::Retry : Choice::Quit;
+    }
+    StringCbPrintfA(msg, sizeof(msg),
+        "%s\n\n"
+        "Click Try Again, Continue to play with the files you have now "
+        "(they may be out of date), or Cancel to quit.", problem);
+    int r = Ask(msg, MB_CANCELTRYCONTINUE | MB_ICONWARNING);
+    return r == IDTRYAGAIN ? Choice::Retry : r == IDCONTINUE ? Choice::Play : Choice::Quit;
+}
+
+// Fetches the manifest (and the base's overlay) into `entries`. Returns false with a plain sentence in `problem`.
+bool FetchManifests(const ParsedUrl& base, const std::string& patch_url, const std::string& wz_base,
+                    std::vector<ManifestEntry>& entries, const char*& problem) {
+    std::wstring manifest_path = JoinPath(base.path, L"manifest.txt");
+    std::vector<uint8_t> manifest_body;
+    if (!HttpGetBytes(base, manifest_path, manifest_body, MANIFEST_TIMEOUT_MS)) {
+        Detail("could not reach patch server (%s)", patch_url.c_str());
+        Log("Could not reach the update server.");
+        problem = "Could not reach the update server to check for new game files.";
+        return false;
+    }
+    if (!ParseManifest(manifest_body, entries) || entries.empty()) {
+        Detail("manifest was empty or invalid (%s)", patch_url.c_str());
+        Log("The update server sent an empty or damaged file list.");
+        problem = "The update server sent an empty or damaged list of game files.";
+        return false;
+    }
+    if (!wz_base.empty()) {
+        std::string source = "bases/" + wz_base + "/";
+        std::vector<uint8_t> overlay_body;
+        std::vector<ManifestEntry> overlay;
+        if (!HttpGetBytes(base, JoinPath(base.path, Widen(source + "manifest.txt")),
+                          overlay_body, MANIFEST_TIMEOUT_MS)
+                || !ParseManifest(overlay_body, overlay) || overlay.empty()) {
+            // Never patch with the main manifest alone: it would replace this
+            // client's WZ files with the Community Repack set.
+            Detail("patch server has no manifest for base=%s", wz_base.c_str());
+            Log("The update server has no files for this kind of client.");
+            problem = "The update server has no game files for this kind of client "
+                      "(the base= line in config.ini).";
+            return false;
+        }
+        ApplyOverlay(entries, overlay, source);
+    }
+    return true;
 }
 
 } // namespace
@@ -686,13 +776,18 @@ bool PatcherRun() {
 
     ParsedUrl base;
     if (!ParseUrl(patch_url, base)) {
-        ErrorMessage("Invalid patch_url in config.ini: %s", patch_url.c_str());
+        Detail("config.ini [config] patch_url=\"%s\" is not an http:// or https:// address", patch_url.c_str());
+        ErrorMessage("The update server address in config.ini (the patch_url line) is not a web address, so the "
+                     "game files cannot be checked.\n\n"
+                     "Ask the host for a fresh config.ini, or put back the one that came with the game.");
         return false;
     }
 
     std::string wz_base;
     if (!ReadBaseFromConfig(wz_base)) {
-        ErrorMessage("Invalid base in config.ini (letters, digits, - and _ only).");
+        Detail("config.ini [config] base= has characters other than letters, digits, - and _");
+        ErrorMessage("The base line in config.ini is not a valid name, so the game files cannot be checked.\n\n"
+                     "Ask the host for a fresh config.ini, or put back the one that came with the game.");
         return false;
     }
 
@@ -701,67 +796,42 @@ bool PatcherRun() {
     // EnsureConsole() is called lazily via Log() only when we hit real work
     // (a download, an error, or a user-facing retry prompt).
 
-    std::wstring manifest_path = JoinPath(base.path, L"manifest.txt");
-    std::vector<uint8_t> manifest_body;
-    if (!HttpGetBytes(base, manifest_path, manifest_body, MANIFEST_TIMEOUT_MS)) {
-        Log("could not reach patch server (%s)", patch_url.c_str());
-        bool cont = AskContinue(
-            "BotStory",
-            "Could not reach the patch server.\n\n"
-            "Play with your current files?\n"
-            "(Click No to quit and try again later.)");
-        DetachConsole();
-        return cont;
-    }
-
     std::vector<ManifestEntry> entries;
-    if (!ParseManifest(manifest_body, entries) || entries.empty()) {
-        Log("manifest was empty or invalid");
-        bool cont = AskContinue(
-            "BotStory",
-            "Patch server returned an invalid manifest.\n\n"
-            "Play with your current files?");
-        DetachConsole();
-        return cont;
-    }
-
-    if (!wz_base.empty()) {
-        std::string source = "bases/" + wz_base + "/";
-        std::vector<uint8_t> overlay_body;
-        std::vector<ManifestEntry> overlay;
-        if (!HttpGetBytes(base, JoinPath(base.path, Widen(source + "manifest.txt")),
-                          overlay_body, MANIFEST_TIMEOUT_MS)
-                || !ParseManifest(overlay_body, overlay) || overlay.empty()) {
-            // Never patch with the main manifest alone: it would replace this
-            // client's WZ files with the Community Repack set.
-            Log("patch server has no manifest for base=%s", wz_base.c_str());
-            char msg[512];
-            StringCbPrintfA(msg, sizeof(msg),
-                "The patch server has no files for this client's WZ set "
-                "(config.ini base=%s).\n\n"
-                "Play with your current files?", wz_base.c_str());
-            bool cont = AskContinue("BotStory", msg);
-            DetachConsole();
-            return cont;
+    for (;;) {
+        const char* problem = "";
+        entries.clear();
+        if (FetchManifests(base, patch_url, wz_base, entries, problem)) {
+            break;
         }
-        ApplyOverlay(entries, overlay, source);
+        Choice c = AskAfterServerProblem(problem);
+        if (c == Choice::Retry) {
+            Log("Trying the update server again...");
+            continue;
+        }
+        DetachConsole();
+        return c == Choice::Play;
     }
 
     CacheMap cache;
     LoadCache(cache);
 
     int updated = 0;
-    int checked = 0;
-    for (const auto& e : entries) {
-        ++checked;
-        if (!ProcessEntry(base, e, cache, updated)) {
+    const int total = (int)entries.size();
+    for (int i = 0; i < total; ++i) {
+        const ManifestEntry& e = entries[(size_t)i];
+        while (!ProcessEntry(base, e, cache, updated, i + 1, total)) {
             SaveCache(cache);
-            ErrorMessage(
-                "Patcher failed on %s.\n\n"
-                "Could not sync client files. Try again or contact the host.",
+            char msg[1024];
+            StringCbPrintfA(msg, sizeof(msg),
+                "Could not download the game file %s.\n\n"
+                "Check your internet connection and that the game is not already running, then click Retry. "
+                "If it keeps failing, send the log file below to the host.",
                 e.path.c_str());
-            DetachConsole();
-            return false;
+            if (Ask(msg, MB_RETRYCANCEL | MB_ICONERROR) != IDRETRY) {
+                DetachConsole();
+                return false;
+            }
+            Log("Trying %s again...", e.path.c_str());
         }
     }
 
@@ -771,9 +841,9 @@ bool PatcherRun() {
     // run (i.e. there was real work). No-op if the fast-path kept us silent.
     if (g_console_attached) {
         if (updated == 0) {
-            Log("up to date (%d files checked)", checked);
+            Log("All %d game files are up to date. Starting the game...", total);
         } else {
-            Log("patched %d / %d files, launching game...", updated, checked);
+            Log("Updated %d of %d game files. Starting the game...", updated, total);
         }
     }
 

@@ -11,8 +11,10 @@
 // key is wrong, the only observable effect is "config.ini line is ignored"
 // — no crash, no partial state. Fix the string and rebuild.
 #include "pch.h"
+#include "paths.h"
 #include "hook.h"
 #include "constants.h"
+#include "debug.h"
 #include "wvs/config.h"
 
 #include <windows.h>
@@ -49,10 +51,15 @@ bool ReadEnvInt(const char* sName, int* pOut, int nLow, int nHigh) {
     if (n == 0 || n >= sizeof(buf)) return false;
     char* endp = nullptr;
     long val = strtol(buf, &endp, 10);
-    if (endp == buf) return false;
-    if (val < nLow) val = nLow;
-    if (val > nHigh) val = nHigh;
-    *pOut = static_cast<int>(val);
+    if (endp == buf) {
+        LogMessage("[client_prefs] %s=\"%s\" is not a number; using the in-game setting instead", sName, buf);
+        return false;
+    }
+    long clamped = val < nLow ? nLow : val > nHigh ? nHigh : val;
+    if (clamped != val) {
+        LogMessage("[client_prefs] %s=%ld is outside %d-%d; using %ld", sName, val, nLow, nHigh, clamped);
+    }
+    *pOut = static_cast<int>(clamped);
     return true;
 }
 
@@ -89,12 +96,12 @@ void MirrorPrefsToConfigAfterSaveGlobal() {
         char existing[32];
         DWORD n = GetPrivateProfileStringA(
             "config", p.ini_key, "",
-            existing, sizeof(existing), ".\\" CONSTANTS_CONFIG_NAME);
+            existing, sizeof(existing), kpaths::ConfigPath());
         if (n == 0) continue;  // user didn't opt in → leave alone
         int val = cfg->GetOpt_Int(CConfig::GLOBAL_OPT, p.opt_key, 0, p.lo, p.hi);
         char sVal[16];
         _snprintf_s(sVal, sizeof(sVal), _TRUNCATE, "%d", val);
         WritePrivateProfileStringA("config", p.ini_key, sVal,
-                                   ".\\" CONSTANTS_CONFIG_NAME);
+                                   kpaths::ConfigPath());
     }
 }

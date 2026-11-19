@@ -4,6 +4,7 @@
 #include "debug.h"
 
 #include <windows.h>
+#include <strsafe.h>
 
 namespace v83 {
 
@@ -73,19 +74,20 @@ void EnsureClientVersionOrExit() {
     }
 
     const ClientFingerprint fp = ReadClientFingerprint();
-    char msg[512];
-    wsprintfA(msg,
-              "Kaentake refuses to attach: MapleStory.exe does not match the\n"
-              "expected v83 fingerprint compiled into v83_offsets.h.\n\n"
-              "Expected SizeOfImage=0x%08X, TimeDateStamp=0x%08X\n"
-              "Actual   SizeOfImage=0x%08X, TimeDateStamp=0x%08X\n\n"
-              "Running with wrong offsets will corrupt client memory.\n"
-              "Update kExpectedImageSize / kExpectedTimeDateStamp if this\n"
-              "client is the one the mod is intended for.",
-              kExpectedImageSize, kExpectedTimeDateStamp,
-              fp.valid ? fp.size_of_image : 0u,
-              fp.valid ? fp.timestamp     : 0u);
-    MessageBoxA(nullptr, msg, "Kaentake: client version mismatch", MB_ICONERROR | MB_OK);
+    // the numbers are for the host; the player gets a plain sentence and where the numbers went
+    LogMessage("[version_guard] MapleStory.exe does not match the v83 build the offsets were written for: "
+               "expected SizeOfImage=0x%08X TimeDateStamp=0x%08X, found SizeOfImage=0x%08X TimeDateStamp=0x%08X",
+               kExpectedImageSize, kExpectedTimeDateStamp,
+               fp.valid ? fp.size_of_image : 0u,
+               fp.valid ? fp.timestamp     : 0u);
+    char msg[1024];
+    StringCbCopyA(msg, sizeof(msg),
+                  "This MapleStory.exe is not the version BotStory works with, so the game was stopped "
+                  "before it could crash.\n\n"
+                  "Start the game with Launch Game.exe so it can fetch the right files. "
+                  "If this keeps happening, send the log file below to the host.");
+    AppendLogFileHint(msg, sizeof(msg));
+    MessageBoxA(nullptr, msg, "BotStory", MB_ICONERROR | MB_OK);
     ExitProcess(1);
 }
 

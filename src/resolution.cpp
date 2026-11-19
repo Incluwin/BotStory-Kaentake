@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "paths.h"
 #include "hook.h"
 #include "constants.h"
 #include "wvs/config.h"
@@ -187,14 +188,14 @@ void CConfig::SaveGlobal_hook() {
     char buf[32];
     DWORD n = GetPrivateProfileStringA(
         "config", "resolution", "",
-        buf, sizeof(buf), ".\\" CONSTANTS_CONFIG_NAME);
+        buf, sizeof(buf), kpaths::ConfigPath());
     if (n > 0 && g_nResolution >= 0 && g_nResolution <= 4) {
         static const char* const kWxH[] = {
             "800x600", "1024x768", "1366x768", "1600x900", "1920x1080"
         };
         WritePrivateProfileStringA(
             "config", "resolution", kWxH[g_nResolution],
-            ".\\" CONSTANTS_CONFIG_NAME);
+            kpaths::ConfigPath());
     }
 
     // Same mirroring, scaled to the rest of the sysopt keys. Only keys

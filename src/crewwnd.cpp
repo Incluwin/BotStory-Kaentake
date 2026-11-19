@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "paths.h"
 #include "hook.h"
 #include "clientloop.h"
 #include "constants.h"
@@ -25,10 +26,15 @@
 //   CClientSocket::ProcessPacket  (serverpackets.cpp's, shared) 0x17A is parsed here and never reaches the game;
 //                                 HELLO follows the first SET_FIELD of each connection.
 //   CWndMan::ProcessKey           the hotkey, only while no edit box has the focus (so never while chatting) and only
-//                                 when the key is unbound in the player's key map.
+//                                 when the key is unbound in the player's key map; Esc closes the window while the
+//                                 mouse is over it or it was the last window clicked (the window still never takes
+//                                 the keyboard focus).
 //   clientloop::OnLeaveGame       the window closes; WELCOME is forgotten.
 //   clientloop::OnClearFieldUI    the window closes (Cash Shop, MTS).
-// config.ini [config]: crew_window=0 skips every hook; crew_hotkey=<letter or digit> (default U).
+//   clientloop::OnFrame           the "server did not answer" timeout and the status line's notices.
+//   clientloop::OnMessage         a click anywhere: whether the last window clicked was this one (for Esc).
+// config.ini [config]: crew_window=0 skips every hook; crew_hotkey=<one letter or digit> (default U).
+// config.ini [crew]: x, y  where the window was last closed (written on close, read at start).
 
 using namespace v83::crew;
 using namespace crewproto;
@@ -37,7 +43,7 @@ namespace {
 
 void crew_log(const char* fmt, ...) {
     FILE* fp = nullptr;
-    if (fopen_s(&fp, "kaentake_diag.txt", "a") != 0 || !fp) {
+    if (fopen_s(&fp, kpaths::LogPath(), "a") != 0 || !fp) {
         return;
     }
     fputs("[crew] ", fp);
@@ -131,6 +137,8 @@ constexpr int kCloseX = 291;
 constexpr int kCloseY = 7;
 int g_nWndH = kWndHDefault;  // the background's height: the panel and the button bar follow it
 inline int PanelBottom() { return g_nWndH - 57; }
+inline int StatusY() { return PanelBottom() - 14; }  // the status line, the panel's last line under the crew
+inline int ListBottom() { return StatusY() - 3; }    // the crew rows end above it
 inline int BtnRow1() { return g_nWndH - 47; }
 inline int BtnRow2() { return g_nWndH - 25; }
 
@@ -149,8 +157,14 @@ const wchar_t* const kButtonLabel[BT_COUNT] = {
     L"Follow", L"Wait", L"Gather", L"Rebuff", L"",
 };
 
-int g_nSavedLeft = INT_MIN;
+int g_nSavedLeft = INT_MIN;  // config.ini [crew] x, y: where the window was last closed
 int g_nSavedTop = INT_MIN;
+bool g_bLastClickOurs = false;  // the last left click went to this window (Esc closes it then)
+
+constexpr DWORD kNoAnswerMs = 6000;      // no snapshot this long after asking: say the server did not answer
+constexpr DWORD kSentGoneMs = 8000;      // "Sent" with no snapshot back this long is cleared
+constexpr DWORD kNoticeMs = 4000;        // a click on a switched-off button: how long its reason stays
+constexpr int kRetryW = 80;
 
 class CCrewWnd : public CWnd {
 public:
@@ -174,6 +188,19 @@ public:
     std::string m_hoverRow;
     bool m_bClosing = false;
     bool m_bOwnTitle = false;   // no Custom.wz art: the stock background's title is covered and "Crew" drawn
+    bool m_bMouseInside = false;
+    int m_nHoverAny = BT_NONE;  // the button under the mouse, switched off or not (the status line explains why)
+
+    // waiting for the first snapshot after OPEN
+    DWORD m_dwAsked = 0;
+    bool m_bNoAnswer = false;
+    bool m_bHoverRetry = false;
+    bool m_bPressedRetry = false;
+
+    // the status line's notice: after a press ("Sent..."), or why a clicked button is off
+    std::wstring m_notice;
+    DWORD m_dwNotice = 0;
+    bool m_bNoticeSent = false;  // a press waiting for the next snapshot
 
     // a press on a row that may become a drag
     std::string m_dragId;
@@ -218,6 +245,7 @@ public:
         x = (std::max)(0, (std::min)(x, get_screen_width() - kWndW));
         y = (std::max)(0, (std::min)(y, get_screen_height() - g_nWndH));
         CWnd::CreateWnd(this, x, y, kWndW, g_nWndH, 10, 1, nullptr, 0);
+        m_dwAsked = GetTickCount();
         play_ui_sound(L"MenuUp");
         InvalidateRect(nullptr);
     }
@@ -286,7 +314,7 @@ public:
         return kPartyTop + 16 + rows * kRowH + 6;
     }
     int BenchTop() const { return BenchHeaderY() + 16; }
-    int BenchVisible() const { return (std::max)(1, (PanelBottom() - BenchTop()) / kRowH); }
+    int BenchVisible() const { return (std::max)(1, (ListBottom() - BenchTop()) / kRowH); }
     void ClampScroll() {
         int maxScroll = (std::max)(0, static_cast<int>(g_snap.bench.size()) - BenchVisible());
         m_nBenchScroll = (std::max)(0, (std::min)(m_nBenchScroll, maxScroll));
@@ -333,7 +361,16 @@ public:
         return hit;
     }
     bool InPartyBlock(int y) const { return y >= kPartyTop && y < BenchHeaderY(); }
-    bool InBenchBlock(int y) const { return y >= BenchHeaderY() && y < PanelBottom(); }
+    bool InBenchBlock(int y) const { return y >= BenchHeaderY() && y < ListBottom(); }
+
+    // the "Ask again" button under "the server did not answer"
+    static RECT RetryRect() { return {kLeft, kPartyTop + 50, kLeft + kRetryW, kPartyTop + 50 + kBtnH}; }
+    bool InRetry(int x, int y) const {
+        if (g_snap.valid || !m_bNoAnswer) return false;
+        RECT rc = RetryRect();
+        POINT pt{x, y};
+        return PtInRect(&rc, pt) != 0;
+    }
 
     // ---- what each button would do now ----
 
@@ -364,9 +401,83 @@ public:
         }
     }
 
+    // Why a button is off, for the status line. Plain words; the button names stay as the server's menus use them.
+    std::wstring WhyOff(int bt) const {
+        if (!g_snap.valid) {
+            return m_bNoAnswer ? L"The server did not answer, so this is off." : L"Waiting for your crew...";
+        }
+        const Row* p = SelParty();
+        const Row* b = SelBench();
+        switch (bt) {
+        case BT_CALL:
+            if (b) return b->name + L" can't come right now.";
+            if (p) return p->name + L" is already out with you.";
+            return L"Pick someone on the Bench to call.";
+        case BT_BENCH:
+            if (p) return p->name + L" can't go to the Bench right now.";
+            return L"Pick someone in your Party to bench.";
+        case BT_SWAP:
+            if (p && b) return p->name + L" and " + b->name + L" can't swap right now.";
+            return L"Pick one in your Party and one on the Bench.";
+        case BT_CARD: return L"Pick someone to see their card.";
+        case BT_USUAL: return L"No usual lineup to call right now.";
+        case BT_FOLLOW: case BT_WAIT: case BT_GATHER: case BT_REBUFF: return L"Nobody is out with you.";
+        default: return L"";
+        }
+    }
+
+    // ---- the status line ----
+
+    void Notice(const std::wstring& text, bool bSent) {
+        m_notice = text;
+        m_dwNotice = GetTickCount();
+        m_bNoticeSent = bSent;
+        InvalidateRect(nullptr);
+    }
+    void Sent() {
+        Notice(L"Sent. Waiting for the server...", true);
+    }
+    void ClearNotice() {
+        if (m_notice.empty()) return;
+        m_notice.clear();
+        m_bNoticeSent = false;
+        InvalidateRect(nullptr);
+    }
+
+    std::wstring StatusText() const {
+        if (!g_snap.valid) return L"";
+        if (m_nHoverAny != BT_NONE && m_nHoverAny != BT_CLOSE && !Enabled(m_nHoverAny)) return WhyOff(m_nHoverAny);
+        if (!m_notice.empty()) return m_notice;
+        if (!m_hoverRow.empty()) return L"Click to pick, drag to move, double-click for the card.";
+        return L"";
+    }
+
+    // Every frame: the no-answer timeout and the notices' lifetimes.
+    void Tick() {
+        DWORD now = GetTickCount();
+        if (!g_snap.valid && !m_bNoAnswer && !g_page.valid && now - m_dwAsked > kNoAnswerMs) {
+            m_bNoAnswer = true;
+            crew_log("no SNAPSHOT %lu ms after OPEN", static_cast<unsigned long>(kNoAnswerMs));
+            InvalidateRect(nullptr);
+        }
+        if (m_notice.empty()) return;
+        // a press that brought no snapshot (the server may refuse without one) stops saying "Sent" after a while
+        if (now - m_dwNotice > (m_bNoticeSent ? kSentGoneMs : kNoticeMs)) ClearNotice();
+    }
+
+    // "Ask again": the same OPEN the window sent when it opened.
+    void AskAgain() {
+        m_bNoAnswer = false;
+        m_dwAsked = GetTickCount();
+        crew_log("asking again (OPEN)");
+        if (g_bEnabled) SendSimple(OP_OPEN);
+        InvalidateRect(nullptr);
+    }
+
     void Press(int bt) {
         const Row* p = SelParty();
         const Row* b = SelBench();
+        if (bt != BT_CLOSE && !(bt == BT_MORE && g_bSelfTest && !g_bEnabled)) Sent();
         switch (bt) {
         case BT_CALL: SendAction(VERB_CALL, b ? b : p, nullptr); break;
         case BT_BENCH: SendAction(VERB_BENCH, p, nullptr); break;
@@ -410,6 +521,8 @@ public:
         if (FindRow(m_selParty, &inParty) && !inParty) { m_selBench = m_selParty; m_selParty.clear(); }
         if (FindRow(m_selBench, &inParty) && inParty) { m_selParty = m_selBench; m_selBench.clear(); }
         ClampScroll();
+        m_bNoAnswer = false;
+        if (m_bNoticeSent) ClearNotice(); // the answer to the press is on screen now
         InvalidateRect(nullptr);
     }
 
@@ -424,6 +537,7 @@ public:
         m_bPageWaiting = false;
         m_bDragging = false;
         m_dragId.clear();
+        if (m_bNoticeSent) ClearNotice();
         InvalidateRect(nullptr);
     }
 
@@ -810,6 +924,11 @@ public:
             Fill(c, 8, 10, 142, 7, 0xFFFFFFFF);
             Text(c, m_pFontBold, 8, 7, L"Crew");
         }
+        { // the key that opens and closes the window, beside the title (left of the close button)
+            std::wstring key = L"Key: ";
+            key.push_back(static_cast<wchar_t>(g_uHotkeyVk));
+            Text(c, m_pFontGrey, kCloseX - 6 - TextW(m_pFontGrey, key), kCloseY, key);
+        }
 
         IWzCanvasPtr pClose = m_pClose[m_nPressedBtn == BT_CLOSE ? 2 : m_nHoverBtn == BT_CLOSE ? 1 : 0];
         if (!pClose) pClose = m_pClose[0];
@@ -824,8 +943,17 @@ public:
             DrawPage(c);
             return;
         }
-        if (!g_snap.valid) {
+        if (!g_snap.valid && !m_bNoAnswer) {
             Text(c, m_pFontGrey, kLeft, kPartyTop, L"Asking your crew...");
+        } else if (!g_snap.valid) {
+            Text(c, m_pFontBold, kLeft, kPartyTop, L"The server did not answer.");
+            Text(c, m_pFontGrey, kLeft, kPartyTop + 18, L"It may be busy. Ask again, or close this window.");
+            RECT rc = RetryRect();
+            unsigned int fill = m_bPressedRetry ? 0xFFB9CBE3 : m_bHoverRetry ? 0xFFFFFFFF : 0xFFE6EDF6;
+            Fill(c, rc.left, rc.top, kRetryW, kBtnH, 0xFF7D90AA);
+            Fill(c, rc.left + 1, rc.top + 1, kRetryW - 2, kBtnH - 2, fill);
+            std::wstring label = L"Ask again";
+            Text(c, m_pFont, rc.left + (kRetryW - TextW(m_pFont, label)) / 2, rc.top + 3, label);
         } else {
             std::wstring head = L"Party " + std::to_wstring(g_snap.seats) + L"/" + std::to_wstring(g_snap.partyCap);
             Text(c, m_pFontBold, kLeft, kPartyTop, head);
@@ -834,7 +962,7 @@ public:
             }
             int y = kPartyTop + 16;
             if (g_snap.party.empty()) {
-                Text(c, m_pFontLight, kLeft + 4, y + 7, L"(nobody out with me)");
+                Text(c, m_pFontLight, kLeft + 4, y + 7, L"Nobody is out with you right now.");
             }
             for (auto& r : g_snap.party) {
                 DrawRow(c, r, y, r.id == m_selParty);
@@ -842,13 +970,14 @@ public:
             }
             int bh = BenchHeaderY();
             Fill(c, kLeft - 3, bh - 4, kRight - kLeft + 6, 1, 0xFFB4C3D6);
-            std::wstring bench = L"Bench (" + std::to_wstring(g_snap.bench.size()) + L" of "
-                + std::to_wstring(g_snap.benchSeats) + L" bench seats)";
+            // the same "taken/seats" form as the Party heading
+            std::wstring bench = L"Bench " + std::to_wstring(g_snap.bench.size()) + L"/"
+                + std::to_wstring(g_snap.benchSeats);
             Text(c, m_pFontBold, kLeft, bh, bench);
             int by = BenchTop();
             int visible = BenchVisible();
             if (g_snap.bench.empty()) {
-                Text(c, m_pFontLight, kLeft + 4, by + 7, L"(nobody at camp)");
+                Text(c, m_pFontLight, kLeft + 4, by + 7, L"Nobody is on the Bench.");
             }
             for (int i = 0; i < visible; ++i) {
                 size_t index = static_cast<size_t>(m_nBenchScroll + i);
@@ -857,8 +986,13 @@ public:
             }
             if (m_nBenchScroll > 0) Text(c, m_pFontGrey, kRight - 8, bh, L"\x25B2");
             if (m_nBenchScroll + visible < static_cast<int>(g_snap.bench.size())) {
-                Text(c, m_pFontGrey, kRight - 8, PanelBottom() - 14, L"\x25BC");
+                Text(c, m_pFontGrey, kRight - 8, ListBottom() - 14, L"\x25BC");
             }
+        }
+        std::wstring status = StatusText();
+        if (!status.empty()) {
+            Fill(c, kLeft - 3, StatusY() - 2, kRight - kLeft + 6, 1, 0xFFB4C3D6);
+            Text(c, m_pFontGrey, kLeft, StatusY(), status, kRight - kLeft);
         }
         for (int bt = BT_CALL; bt < BT_CLOSE; ++bt) {
             DrawButton(c, bt);
@@ -925,6 +1059,7 @@ public:
             }
         }
         play_ui_sound(L"DragEnd");
+        Sent();
     }
 
     // A page takes the clicks: its options and buttons, and the title bar's close button.
@@ -973,17 +1108,26 @@ public:
         if (this != ms_pInstance || m_bClosing) return;
         m_nMouseX = rx;
         m_nMouseY = ry;
+        if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK) g_bLastClickOurs = true; // Esc closes this window now
         if (g_page.valid) {
             PageMouseButton(msg, rx, ry);
             return;
         }
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK) {
+            if (InRetry(rx, ry)) {
+                m_bPressedRetry = true;
+                play_ui_sound(L"BtMouseClick");
+                InvalidateRect(nullptr);
+                return;
+            }
             int bt = ButtonAt(rx, ry);
             if (bt != BT_NONE) {
                 if (Enabled(bt)) {
                     m_nPressedBtn = bt;
                     play_ui_sound(L"BtMouseClick");
                     InvalidateRect(nullptr);
+                } else if (g_snap.valid) {
+                    Notice(WhyOff(bt), false);
                 }
                 return;
             }
@@ -993,6 +1137,7 @@ public:
                 if (hit.row->id == m_lastClickId && now - m_dwLastClick < 400) {
                     m_lastClickId.clear();
                     SendAction(VERB_CARD, hit.row, nullptr); // double-click: the card, as in the Crew window
+                    Sent();
                     return;
                 }
                 m_lastClickId = hit.row->id;
@@ -1005,6 +1150,12 @@ public:
             return;
         }
         if (msg == WM_LBUTTONUP) {
+            if (m_bPressedRetry) {
+                m_bPressedRetry = false;
+                if (InRetry(rx, ry)) AskAgain();
+                InvalidateRect(nullptr);
+                return;
+            }
             if (m_bDragging) {
                 m_bDragging = false;
                 Drop(rx, ry);
@@ -1051,13 +1202,17 @@ public:
             m_bDragging = true;
             play_ui_sound(L"DragStart");
         }
-        int bt = ButtonAt(rx, ry);
+        int any = ButtonAt(rx, ry);
+        int bt = any;
         if (bt != BT_NONE && !Enabled(bt)) bt = BT_NONE;
+        bool retry = InRetry(rx, ry);
         RowHit hit = HitRow(rx, ry);
         std::string hover = hit.row ? hit.row->id : std::string();
-        if (bt != m_nHoverBtn || hover != m_hoverRow || m_bDragging) {
-            if (bt != BT_NONE && bt != m_nHoverBtn) play_ui_sound(L"BtMouseOver");
+        if (bt != m_nHoverBtn || any != m_nHoverAny || retry != m_bHoverRetry || hover != m_hoverRow || m_bDragging) {
+            if ((bt != BT_NONE && bt != m_nHoverBtn) || (retry && !m_bHoverRetry)) play_ui_sound(L"BtMouseOver");
             m_nHoverBtn = bt;
+            m_nHoverAny = any;
+            m_bHoverRetry = retry;
             m_hoverRow = hover;
             InvalidateRect(nullptr);
         }
@@ -1083,8 +1238,12 @@ public:
 
     virtual void OnMouseEnter(int bEnter) override {
         CWnd::OnMouseEnter(bEnter);
-        if (!bEnter && (m_nHoverBtn != BT_NONE || !m_hoverRow.empty() || m_nHoverOption >= 0)) {
+        m_bMouseInside = bEnter != 0;
+        if (!bEnter && (m_nHoverBtn != BT_NONE || m_nHoverAny != BT_NONE || m_bHoverRetry || !m_hoverRow.empty()
+                        || m_nHoverOption >= 0)) {
             m_nHoverBtn = BT_NONE;
+            m_nHoverAny = BT_NONE;
+            m_bHoverRetry = false;
             m_hoverRow.clear();
             m_nHoverOption = -1;
             InvalidateRect(nullptr);
@@ -1098,6 +1257,14 @@ public:
                 g_nSavedTop = GetAbsTop();
             } catch (...) {
             }
+            if (g_nSavedLeft != INT_MIN && g_nSavedTop != INT_MIN) { // kept for the next start too
+                char sx[16], sy[16];
+                _snprintf_s(sx, sizeof(sx), _TRUNCATE, "%d", g_nSavedLeft);
+                _snprintf_s(sy, sizeof(sy), _TRUNCATE, "%d", g_nSavedTop);
+                WritePrivateProfileStringA("crew", "x", sx, kpaths::ConfigPath());
+                WritePrivateProfileStringA("crew", "y", sy, kpaths::ConfigPath());
+            }
+            g_bLastClickOurs = false;
             ms_pInstance = nullptr;
         }
         CWnd::OnDestroy();
@@ -1190,6 +1357,7 @@ void OnCrewPacket(const unsigned char* p, size_t n) {
         break;
     }
     case SV_CLOSE:
+        crew_log("CLOSE: the server turned the Crew window off");
         g_bEnabled = false;
         CloseWindow(false);
         break;
@@ -1263,13 +1431,39 @@ auto CWndMan__ProcessKey = reinterpret_cast<int(__thiscall*)(void*, unsigned int
 
 int __fastcall CWndMan__ProcessKey_hook(void* pThis, void* /*edx*/, unsigned int msg, unsigned int wParam, int lParam) {
     // the client sends a release as WM_KEYDOWN too, with bit 31 set (CWndMan::ProcessKey tests it first)
-    if (msg == WM_KEYDOWN && wParam == g_uHotkeyVk && !(lParam & 0xC0000000) && (g_bEnabled || g_bSelfTest)) {
+    bool bPress = msg == WM_KEYDOWN && !(lParam & 0xC0000000);
+    // Esc: only while the mouse is over the window or it was the last window clicked, and never while an edit box has
+    // the focus, so the game keeps Esc everywhere else
+    if (bPress && wParam == VK_ESCAPE && CCrewWnd::ms_pInstance && NoControlFocused(pThis)
+        && (CCrewWnd::ms_pInstance->m_bMouseInside || g_bLastClickOurs)) {
+        CloseWindow(true);
+        return 0;
+    }
+    if (bPress && wParam == g_uHotkeyVk && !(g_bEnabled || g_bSelfTest)) {
+        // the window opens only after the server's WELCOME said on; the client has no verified way to print a chat
+        // line, so the reason goes to the log
+        static DWORD s_dwLogged = 0;
+        DWORD now = GetTickCount();
+        if (s_dwLogged == 0 || now - s_dwLogged > 60000) {
+            s_dwLogged = now ? now : 1;
+            crew_log("the Crew key %c was pressed, but this server has not turned the Crew window on%s",
+                     static_cast<char>(g_uHotkeyVk), g_bHelloSent ? "" : " (not in the game yet)");
+        }
+    }
+    if (bPress && wParam == g_uHotkeyVk && (g_bEnabled || g_bSelfTest)) {
         int scan = (lParam >> 16) & 0xFF;
         static int s_nLogged = 0;
         if (s_nLogged < 5) {
             ++s_nLogged;
             crew_log("hotkey lParam=%08X scan=%d focus-free=%d unbound=%d", static_cast<unsigned int>(lParam), scan,
                      NoControlFocused(pThis) ? 1 : 0, KeyUnbound(scan) ? 1 : 0);
+        }
+        static bool s_bBoundLogged = false;
+        if (NoControlFocused(pThis) && !KeyUnbound(scan) && !s_bBoundLogged) {
+            s_bBoundLogged = true;
+            crew_log("the Crew key %c is set to something else in the game's key settings, so it does not open "
+                          "the Crew window. Clear that key there, or pick another key with [config] crew_hotkey= "
+                          "in config.ini.", static_cast<char>(g_uHotkeyVk));
         }
         if (NoControlFocused(pThis) && KeyUnbound(scan)) {
             if (CCrewWnd::ms_pInstance) {
@@ -1281,6 +1475,18 @@ int __fastcall CWndMan__ProcessKey_hook(void* pThis, void* /*edx*/, unsigned int
         }
     }
     return CWndMan__ProcessKey(pThis, msg, wParam, lParam);
+}
+
+// Every frame: the open window's timeouts.
+void OnCrewFrame() {
+    if (CCrewWnd::ms_pInstance) CCrewWnd::ms_pInstance->Tick();
+}
+
+// Each message: a left click forgets that the window was the last one clicked; the window's own OnMouseButton, which
+// the same click reaches after this, sets it again when the click was on the window.
+bool OnCrewMessage(UINT uMsg, WPARAM, LPARAM, LRESULT*) {
+    if (uMsg == WM_LBUTTONDOWN || uMsg == WM_RBUTTONDOWN) g_bLastClickOurs = false;
+    return false;
 }
 
 // ---- teardown ---------------------------------------------------------------------------------------------------
@@ -1299,20 +1505,36 @@ void OnCrewClearFieldUI() {
 
 // config.ini next to MapleStory.exe (the working directory is not always the game folder)
 std::string ConfigPath() {
-    char path[MAX_PATH] = {};
-    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    std::string s(path, n);
-    size_t slash = s.find_last_of("\\/");
-    return (slash == std::string::npos ? std::string(".") : s.substr(0, slash)) + "\\" CONSTANTS_CONFIG_NAME;
+    return kpaths::ConfigPath();
 }
 
+// [config] crew_hotkey: exactly one letter or digit (any case). Anything else is logged and U is used.
 UINT ReadHotkey(const std::string& config) {
-    char buf[16] = {};
-    GetPrivateProfileStringA("config", "crew_hotkey", "U", buf, sizeof(buf), config.c_str());
-    char ch = buf[0];
+    char buf[32] = {};
+    DWORD n = GetPrivateProfileStringA("config", "crew_hotkey", "U", buf, sizeof(buf), config.c_str());
+    char ch = n == 1 ? buf[0] : '\0';
     if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
     if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) return static_cast<UINT>(ch);
+    crew_log("config.ini [config] crew_hotkey=\"%s\" is not one letter or digit; using U instead", buf);
     return 'U';
+}
+
+// [crew] x, y: where the window was last closed. A missing or unreadable pair leaves the window centred.
+void ReadSavedPosition(const std::string& config) {
+    char sx[32] = {}, sy[32] = {};
+    DWORD nx = GetPrivateProfileStringA("crew", "x", "", sx, sizeof(sx), config.c_str());
+    DWORD ny = GetPrivateProfileStringA("crew", "y", "", sy, sizeof(sy), config.c_str());
+    if (nx == 0 && ny == 0) return;
+    char* ex = nullptr;
+    char* ey = nullptr;
+    long x = strtol(sx, &ex, 10);
+    long y = strtol(sy, &ey, 10);
+    if (nx == 0 || ny == 0 || ex == sx || ey == sy || *ex || *ey || x < -10000 || x > 10000 || y < -10000 || y > 10000) {
+        crew_log("config.ini [crew] x=\"%s\" y=\"%s\" is not a position; the window opens centred instead", sx, sy);
+        return;
+    }
+    g_nSavedLeft = static_cast<int>(x); // clamped to the screen when the window opens
+    g_nSavedTop = static_cast<int>(y);
 }
 
 }  // namespace
@@ -1335,12 +1557,15 @@ void AttachCrewWindowMod() {
         return;
     }
     g_uHotkeyVk = ReadHotkey(config);
+    ReadSavedPosition(config);
     g_bSelfTest = GetPrivateProfileIntA("config", "crew_selftest", 0, config.c_str()) != 0;
     serverpackets::OnRecv(kRecvOpcode, OnCrewRecv);
     serverpackets::OnSetField(OnCrewSetField);
     ATTACH_HOOK(CWndMan__ProcessKey, CWndMan__ProcessKey_hook);
     clientloop::OnLeaveGame(OnCrewLeaveGame);
     clientloop::OnClearFieldUI(OnCrewClearFieldUI);
+    clientloop::OnFrame(OnCrewFrame);
+    clientloop::OnMessage(OnCrewMessage);
     g_bHooksOn = true;
     crew_log("on, hotkey %c%s", static_cast<char>(g_uHotkeyVk), g_bSelfTest ? ", self-test" : "");
 }
