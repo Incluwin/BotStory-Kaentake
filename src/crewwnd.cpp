@@ -146,6 +146,15 @@ enum Button { BT_NONE = 0, BT_CALL, BT_BENCH, BT_SWAP, BT_CARD, BT_USUAL, BT_MOR
               BT_FOLLOW, BT_WAIT, BT_GATHER, BT_REBUFF, BT_CLOSE, BT_COUNT,
               // the buttons under a page
               PB_CLOSE = 100, PB_YES, PB_NO, PB_PREV, PB_NEXT };
+// The tabs under the title, in the band the UserList background keeps for its own (Friend / Party / Guild): the crew
+// out with the owner, the ones at camp, and the server's actions page (protocol 2: lineups, formation, hiring).
+enum Tab { TAB_CREW = 0, TAB_CAMP, TAB_PLANS, TAB_COUNT };
+constexpr int kTabTop = 28;
+constexpr int kTabH = 18;
+constexpr int kTabW = 74;
+constexpr int kTabGap = 2;
+constexpr int kCampRowH = 42;  // a camp row: the name line and its detail on two lines
+constexpr DWORD kPlansWaitMs = 3000;  // the Plans tab says so when its page has not come this long after asking
 constexpr int kPageBtnW = 60;
 constexpr int kLineH = 14;
 constexpr int kPageW = kRight - kLeft;
@@ -159,6 +168,7 @@ const wchar_t* const kButtonLabel[BT_COUNT] = {
 
 int g_nSavedLeft = INT_MIN;  // config.ini [crew] x, y: where the window was last closed
 int g_nSavedTop = INT_MIN;
+int g_nSavedTab = TAB_CREW;  // config.ini [crew] tab: Crew or Camp, the list the window last showed
 bool g_bLastClickOurs = false;  // the last left click went to this window (Esc closes it then)
 
 constexpr DWORD kNoAnswerMs = 6000;      // no snapshot this long after asking: say the server did not answer
@@ -183,6 +193,11 @@ public:
     std::string m_selBench;
     std::string m_lastPicked;   // the row clicked last (Card acts on it)
     int m_nBenchScroll = 0;
+    int m_nTab = TAB_CREW;
+    int m_nListTab = TAB_CREW;  // Crew or Camp: where a closed Plans page goes back to
+    int m_nHoverTab = -1;
+    int m_nPressedTab = -1;
+    DWORD m_dwPlansAsked = 0;
     int m_nHoverBtn = BT_NONE;
     int m_nPressedBtn = BT_NONE;
     std::string m_hoverRow;
@@ -202,11 +217,10 @@ public:
     DWORD m_dwNotice = 0;
     bool m_bNoticeSent = false;  // a press waiting for the next snapshot
 
-    // a press on a row that may become a drag
+    // a press on a row: the release on it picks it
     std::string m_dragId;
     bool m_dragFromParty = false;
-    bool m_bDragging = false;
-    int m_nDownX = 0, m_nDownY = 0, m_nMouseX = 0, m_nMouseY = 0;
+    int m_nMouseX = 0, m_nMouseY = 0;
     DWORD m_dwLastClick = 0;
     std::string m_lastClickId;
 
@@ -245,6 +259,7 @@ public:
         x = (std::max)(0, (std::min)(x, get_screen_width() - kWndW));
         y = (std::max)(0, (std::min)(y, get_screen_height() - g_nWndH));
         CWnd::CreateWnd(this, x, y, kWndW, g_nWndH, 10, 1, nullptr, 0);
+        m_nTab = m_nListTab = g_nSavedTab == TAB_CAMP ? TAB_CAMP : TAB_CREW;
         m_dwAsked = GetTickCount();
         play_ui_sound(L"MenuUp");
         InvalidateRect(nullptr);
@@ -309,26 +324,66 @@ public:
 
     // ---- geometry ----
 
-    int BenchHeaderY() const {
-        int rows = (std::max)(1, static_cast<int>(g_snap.party.size()));
-        return kPartyTop + 16 + rows * kRowH + 6;
+    // Each list tab: its heading at kPartyTop, its rows from ListTop().
+    static int ListTop() { return kPartyTop + 16; }
+    int BenchVisible() const { return (std::max)(1, (ListBottom() - ListTop()) / kCampRowH); }
+
+    static RECT TabRect(int tab) {
+        int x = kLeft - 3 + tab * (kTabW + kTabGap);
+        return {x, kTabTop, x + kTabW, kTabTop + kTabH};
     }
-    int BenchTop() const { return BenchHeaderY() + 16; }
-    int BenchVisible() const { return (std::max)(1, (ListBottom() - BenchTop()) / kRowH); }
+    static int TabAt(int x, int y) {
+        POINT pt{x, y};
+        for (int tab = 0; tab < TAB_COUNT; ++tab) {
+            RECT rc = TabRect(tab);
+            if (PtInRect(&rc, pt)) return tab;
+        }
+        return -1;
+    }
+    std::wstring TabLabel(int tab) const {
+        switch (tab) {
+        case TAB_CREW:
+            return g_snap.valid ? L"Crew " + std::to_wstring(g_snap.seats) + L"/" + std::to_wstring(g_snap.partyCap)
+                                : std::wstring(L"Crew");
+        case TAB_CAMP:
+            return g_snap.valid ? L"Camp " + std::to_wstring(g_snap.bench.size()) + L"/"
+                                      + std::to_wstring(g_snap.benchSeats)
+                                : std::wstring(L"Camp");
+        default: return L"Plans";
+        }
+    }
+
+    // The buttons a tab shows: the row over the bottom one, left to right.
+    static const std::vector<int>& TabButtons(int tab, int row) {
+        static const std::vector<int> crew1{BT_CALL, BT_BENCH, BT_SWAP, BT_CARD};
+        static const std::vector<int> crew2{BT_FOLLOW, BT_WAIT, BT_GATHER, BT_REBUFF};
+        static const std::vector<int> camp1{BT_CALL, BT_SWAP, BT_CARD};
+        static const std::vector<int> none;
+        if (tab == TAB_CREW) return row == 0 ? crew1 : crew2;
+        if (tab == TAB_CAMP) return row == 0 ? camp1 : none;
+        return none;
+    }
     void ClampScroll() {
         int maxScroll = (std::max)(0, static_cast<int>(g_snap.bench.size()) - BenchVisible());
         m_nBenchScroll = (std::max)(0, (std::min)(m_nBenchScroll, maxScroll));
     }
 
-    static RECT ButtonRect(int bt) {
+    // Where a button stands on the tab shown; an empty rect for one the tab does not show.
+    RECT ButtonRect(int bt) const {
         if (bt == BT_CLOSE) return {kCloseX, kCloseY, kCloseX + 12, kCloseY + 12};
-        int index = bt <= BT_MORE ? bt - BT_CALL : bt - BT_FOLLOW;
-        int count = bt <= BT_MORE ? 6 : 4;
-        int gap = 3;
-        int total = count * kBtnW + (count - 1) * gap;
-        int x = (kWndW - total) / 2 + index * (kBtnW + gap);
-        int y = bt <= BT_MORE ? BtnRow1() : BtnRow2();
-        return {x, y, x + kBtnW, y + kBtnH};
+        for (int row = 0; row < 2; ++row) {
+            const std::vector<int>& buttons = TabButtons(m_nTab, row);
+            int count = static_cast<int>(buttons.size());
+            for (int index = 0; index < count; ++index) {
+                if (buttons[static_cast<size_t>(index)] != bt) continue;
+                int gap = 3;
+                int total = count * kBtnW + (count - 1) * gap;
+                int x = (kWndW - total) / 2 + index * (kBtnW + gap);
+                int y = row == 0 ? BtnRow1() : BtnRow2();
+                return {x, y, x + kBtnW, y + kBtnH};
+            }
+        }
+        return {0, 0, 0, 0};
     }
 
     const Row* FindRow(const std::string& id, bool* pParty = nullptr) const {
@@ -345,23 +400,23 @@ public:
     RowHit HitRow(int x, int y) const {
         RowHit hit;
         if (x < kLeft - 4 || x > kRight + 4) return hit;
-        int top = kPartyTop + 16;
-        for (size_t i = 0; i < g_snap.party.size(); ++i) {
-            int ry = top + static_cast<int>(i) * kRowH;
-            if (y >= ry && y < ry + kRowH) { hit.row = &g_snap.party[i]; hit.party = true; return hit; }
-        }
-        int btop = BenchTop();
-        int visible = BenchVisible();
-        for (int i = 0; i < visible; ++i) {
-            size_t index = static_cast<size_t>(m_nBenchScroll + i);
-            if (index >= g_snap.bench.size()) break;
-            int ry = btop + i * kRowH;
-            if (y >= ry && y < ry + kRowH) { hit.row = &g_snap.bench[index]; hit.party = false; return hit; }
+        int top = ListTop();
+        if (m_nTab == TAB_CREW) {
+            for (size_t i = 0; i < g_snap.party.size(); ++i) {
+                int ry = top + static_cast<int>(i) * kRowH;
+                if (y >= ry && y < ry + kRowH) { hit.row = &g_snap.party[i]; hit.party = true; return hit; }
+            }
+        } else if (m_nTab == TAB_CAMP) {
+            int visible = BenchVisible();
+            for (int i = 0; i < visible; ++i) {
+                size_t index = static_cast<size_t>(m_nBenchScroll + i);
+                if (index >= g_snap.bench.size()) break;
+                int ry = top + i * kCampRowH;
+                if (y >= ry && y < ry + kCampRowH) { hit.row = &g_snap.bench[index]; hit.party = false; return hit; }
+            }
         }
         return hit;
     }
-    bool InPartyBlock(int y) const { return y >= kPartyTop && y < BenchHeaderY(); }
-    bool InBenchBlock(int y) const { return y >= BenchHeaderY() && y < ListBottom(); }
 
     // the "Ask again" button under "the server did not answer"
     static RECT RetryRect() { return {kLeft, kPartyTop + 50, kLeft + kRetryW, kPartyTop + 50 + kBtnH}; }
@@ -385,11 +440,14 @@ public:
     const Row* SelBench() const { return FindRow(m_selBench); }
 
     bool Enabled(int bt) const {
-        if (!g_snap.valid) return bt == BT_MORE || bt == BT_CLOSE;
+        if (!g_snap.valid) return bt == BT_CLOSE;
         const Row* p = SelParty();
         const Row* b = SelBench();
         switch (bt) {
-        case BT_CALL: return (b && (b->flags & ROW_CALL)) || (!b && p && (p->flags & ROW_CALL));
+        case BT_CALL: { // the one picked on the tab shown
+            const Row* r = m_nTab == TAB_CAMP ? b : p;
+            return r && (r->flags & ROW_CALL);
+        }
         case BT_BENCH: return p && (p->flags & ROW_BENCH);
         case BT_SWAP: return CanSwap(p, b);
         case BT_CARD: return FindRow(m_lastPicked) != nullptr;
@@ -410,15 +468,18 @@ public:
         const Row* b = SelBench();
         switch (bt) {
         case BT_CALL:
-            if (b) return b->name + L" can't come right now.";
-            if (p) return p->name + L" is already out with you.";
-            return L"Pick someone on the Bench to call.";
+            if (m_nTab == TAB_CAMP) {
+                return b ? b->name + L" can't come right now." : std::wstring(L"Pick someone at camp to call.");
+            }
+            return p ? p->name + L" is already out with you." : std::wstring(L"Pick someone to call them to you.");
         case BT_BENCH:
-            if (p) return p->name + L" can't go to the Bench right now.";
-            return L"Pick someone in your Party to bench.";
+            if (p) return p->name + L" can't go to camp right now.";
+            return L"Pick someone to send to camp.";
         case BT_SWAP:
             if (p && b) return p->name + L" and " + b->name + L" can't swap right now.";
-            return L"Pick one in your Party and one on the Bench.";
+            if (p) return L"Pick who takes " + p->name + L"'s place (Camp tab).";
+            if (b) return L"Pick who makes room for " + b->name + L" (Crew tab).";
+            return L"Pick one on Crew and one on Camp to swap.";
         case BT_CARD: return L"Pick someone to see their card.";
         case BT_USUAL: return L"No usual lineup to call right now.";
         case BT_FOLLOW: case BT_WAIT: case BT_GATHER: case BT_REBUFF: return L"Nobody is out with you.";
@@ -448,7 +509,7 @@ public:
         if (!g_snap.valid) return L"";
         if (m_nHoverAny != BT_NONE && m_nHoverAny != BT_CLOSE && !Enabled(m_nHoverAny)) return WhyOff(m_nHoverAny);
         if (!m_notice.empty()) return m_notice;
-        if (!m_hoverRow.empty()) return L"Click to pick, drag to move, double-click for the card.";
+        if (!m_hoverRow.empty()) return L"Click to pick, double-click for the card.";
         return L"";
     }
 
@@ -477,21 +538,13 @@ public:
     void Press(int bt) {
         const Row* p = SelParty();
         const Row* b = SelBench();
-        if (bt != BT_CLOSE && !(bt == BT_MORE && g_bSelfTest && !g_bEnabled)) Sent();
+        if (bt != BT_CLOSE) Sent();
         switch (bt) {
-        case BT_CALL: SendAction(VERB_CALL, b ? b : p, nullptr); break;
+        case BT_CALL: SendAction(VERB_CALL, m_nTab == TAB_CAMP ? b : p, nullptr); break;
         case BT_BENCH: SendAction(VERB_BENCH, p, nullptr); break;
         case BT_SWAP: SendAction(VERB_SWAP, p, b); break;
         case BT_CARD: SendAction(VERB_CARD, FindRow(m_lastPicked), nullptr); break;
         case BT_USUAL: SendAction(VERB_USUAL, nullptr, nullptr); break;
-        case BT_MORE:
-            if (g_bSelfTest && !g_bEnabled) {
-                ShowSamplePage(0);
-            } else {
-                // protocol 2: the actions page in this window; protocol 1: the NPC Crew window
-                SendAction(g_nProtocol >= 2 ? VERB_ACTIONS : VERB_MORE, nullptr, nullptr);
-            }
-            break;
         case BT_FOLLOW: SendAction(VERB_FOLLOW, nullptr, nullptr); break;
         case BT_WAIT: SendAction(VERB_WAIT, nullptr, nullptr); break;
         case BT_GATHER: SendAction(VERB_GATHER, nullptr, nullptr); break;
@@ -508,6 +561,44 @@ public:
             if (PtInRect(&rc, pt)) return bt;
         }
         return BT_NONE;
+    }
+
+    // ---- tabs ----
+
+    // A click on a tab. Crew and Camp show their list (and close a page that is open); Plans asks the server for its
+    // actions page (protocol 2), or opens the NPC Crew window on a protocol 1 server and stays on the list.
+    void ShowTab(int tab) {
+        if (tab == TAB_PLANS) {
+            if (g_bSelfTest && !g_bEnabled) {
+                m_nTab = TAB_PLANS;
+                ShowSamplePage(0);
+                return;
+            }
+            if (g_nProtocol < 2) {
+                SendAction(VERB_MORE, nullptr, nullptr);
+                Sent();
+                return;
+            }
+            m_nTab = TAB_PLANS;
+            m_dwPlansAsked = GetTickCount();
+            if (!g_page.valid) SendAction(VERB_ACTIONS, nullptr, nullptr);
+            InvalidateRect(nullptr);
+            return;
+        }
+        if (g_page.valid) { // leaving a page: as its Close button
+            if (g_bSelfTest && !g_bEnabled) {
+                g_page = Page();
+            } else {
+                SendPageReply(g_page.stamp, kReplyClose, -1);
+                g_page = Page();
+            }
+            m_bPageWaiting = false;
+        }
+        m_nTab = m_nListTab = tab;
+        m_nHoverBtn = m_nHoverAny = BT_NONE;
+        m_hoverRow.clear();
+        ClampScroll();
+        InvalidateRect(nullptr);
     }
 
     // ---- snapshot ----
@@ -535,7 +626,6 @@ public:
         m_nHoverOption = -1;
         m_nPressedOption = -1;
         m_bPageWaiting = false;
-        m_bDragging = false;
         m_dragId.clear();
         if (m_bNoticeSent) ClearNotice();
         InvalidateRect(nullptr);
@@ -547,6 +637,7 @@ public:
         m_bPageWaiting = false;
         m_nHoverBtn = BT_NONE;
         m_nPressedBtn = BT_NONE;
+        if (m_nTab == TAB_PLANS) m_nTab = m_nListTab; // the page is the Plans tab: without it, back to the list
         InvalidateRect(nullptr);
     }
 
@@ -745,8 +836,8 @@ public:
             if (y < top || y + kLineH - 2 > bottom) continue;
             Text(c, InkFont(r.ink, r.bold), kLeft + r.x, y, r.text);
         }
-        if (m_nPageScroll > 0) Text(c, m_pFontGrey, kRight - 8, top - 14, L"\x25B2");
-        if (m_nPageScroll + PageVisibleH() < m_nPageH) Text(c, m_pFontGrey, kRight - 8, bottom - 2, L"\x25BC");
+        if (m_nPageScroll > 0) Arrow(c, kRight - 8, top - 10, true);
+        if (m_nPageScroll + PageVisibleH() < m_nPageH) Arrow(c, kRight - 8, bottom + 2, false);
         for (int pb : PageButtons()) {
             DrawPageButton(c, pb);
         }
@@ -866,6 +957,13 @@ public:
             return 0;
         }
     }
+    // "More above / below": a small triangle of rows (the game's fonts have no arrow glyphs: one drew as "?").
+    void Arrow(IWzCanvasPtr& c, int x, int y, bool up) {
+        for (int i = 0; i < 4; ++i) {
+            int row = up ? i : 3 - i;
+            Fill(c, x + 3 - row, y + i, 1 + row * 2, 1, 0xFF5A6B82);
+        }
+    }
     static void Fill(IWzCanvasPtr& c, int x, int y, int w, int h, unsigned int color) {
         try {
             c->DrawRectangle(x, y, w, h, color);
@@ -892,8 +990,53 @@ public:
         Text(c, detailFont, kLeft + 4, y + 14, r.detail, kRight - kLeft - 6);
     }
 
+    // A camp row: the name line, then the detail on two lines, broken at one of its " - " joints where the first
+    // line still fits (the text itself is the server's, shown as it is).
+    void DrawCampRow(IWzCanvasPtr& c, const Row& r, int y, bool selected) {
+        if (selected) {
+            Fill(c, kLeft - 3, y, kRight - kLeft + 6, kCampRowH - 1, 0xFFC9DCF5);
+        } else if (r.id == m_hoverRow) {
+            Fill(c, kLeft - 3, y, kRight - kLeft + 6, kCampRowH - 1, 0xFFEEF3FA);
+        }
+        int nameW = TextW(m_pFontBold, r.name);
+        Text(c, m_pFontBold, kLeft, y + 1, r.name, 120);
+        Text(c, m_pFontGrey, kLeft + (std::min)(nameW, 120) + 6, y + 1, r.levelJob, 150);
+        IWzFontPtr& f = (r.flags & ROW_COMMITTED) ? m_pFontLight : m_pFontGrey;
+        const int w = kRight - kLeft - 6;
+        std::wstring first = r.detail, second;
+        if (TextW(f, r.detail) > w) {
+            size_t cut = std::wstring::npos;
+            for (size_t at = r.detail.find(L" - "); at != std::wstring::npos; at = r.detail.find(L" - ", at + 3)) {
+                if (TextW(f, r.detail.substr(0, at)) > w) break;
+                cut = at;
+            }
+            if (cut != std::wstring::npos) {
+                first = r.detail.substr(0, cut);
+                second = r.detail.substr(cut + 3);
+            }
+        }
+        Text(c, f, kLeft + 4, y + 14, first, w);
+        Text(c, f, kLeft + 4, y + 27, second, w);
+    }
+
+    void DrawTabs(IWzCanvasPtr& c) {
+        for (int tab = 0; tab < TAB_COUNT; ++tab) {
+            RECT rc = TabRect(tab);
+            bool on = tab == m_nTab;
+            unsigned int fill = on ? 0xFFFFFFFF : m_nPressedTab == tab ? 0xFFB9CBE3 : m_nHoverTab == tab ? 0xFFEEF3FA
+                                                                                                         : 0xFFD5DDE8;
+            int top = on ? rc.top : rc.top + 2; // the tab shown stands a little taller
+            Fill(c, rc.left, top, kTabW, rc.bottom - top, 0xFF7D90AA);
+            Fill(c, rc.left + 1, top + 1, kTabW - 2, rc.bottom - top - (on ? 1 : 2), fill);
+            IWzFontPtr& f = on ? m_pFontBold : m_pFontGrey;
+            std::wstring label = TabLabel(tab);
+            Text(c, f, rc.left + (kTabW - TextW(f, label)) / 2, top + 3, label);
+        }
+    }
+
     void DrawButton(IWzCanvasPtr& c, int bt) {
         RECT rc = ButtonRect(bt);
+        if (rc.right <= rc.left) return; // not on this tab
         bool on = Enabled(bt);
         unsigned int fill = !on ? 0xFFD8D8D8 : m_nPressedBtn == bt ? 0xFFB9CBE3 : m_nHoverBtn == bt ? 0xFFFFFFFF : 0xFFE6EDF6;
         Fill(c, rc.left, rc.top, kBtnW, kBtnH, 0xFF7D90AA);
@@ -939,8 +1082,15 @@ public:
             }
         }
 
+        DrawTabs(c);
         if (g_page.valid) { // a page covers the crew until it closes; snapshots keep arriving underneath
             DrawPage(c);
+            return;
+        }
+        if (m_nTab == TAB_PLANS) { // its page has not come (yet)
+            bool late = GetTickCount() - m_dwPlansAsked > kPlansWaitMs;
+            Text(c, m_pFontGrey, kLeft, kPartyTop, late ? L"The server sent no plans. Click Plans to ask again."
+                                                       : L"Asking for your plans...");
             return;
         }
         if (!g_snap.valid && !m_bNoAnswer) {
@@ -954,39 +1104,36 @@ public:
             Fill(c, rc.left + 1, rc.top + 1, kRetryW - 2, kBtnH - 2, fill);
             std::wstring label = L"Ask again";
             Text(c, m_pFont, rc.left + (kRetryW - TextW(m_pFont, label)) / 2, rc.top + 3, label);
-        } else {
-            std::wstring head = L"Party " + std::to_wstring(g_snap.seats) + L"/" + std::to_wstring(g_snap.partyCap);
+        } else if (m_nTab == TAB_CREW) {
+            std::wstring head = L"Out with you";
             Text(c, m_pFontBold, kLeft, kPartyTop, head);
             if (!g_snap.seatsNote.empty()) {
                 Text(c, m_pFontGrey, kLeft + TextW(m_pFontBold, head) + 6, kPartyTop, g_snap.seatsNote, 200);
             }
-            int y = kPartyTop + 16;
+            int y = ListTop();
             if (g_snap.party.empty()) {
-                Text(c, m_pFontLight, kLeft + 4, y + 7, L"Nobody is out with you right now.");
+                Text(c, m_pFontLight, kLeft + 4, y + 7, L"Nobody is out with you.");
+                Text(c, m_pFontLight, kLeft + 4, y + 21, L"Call someone from the Camp tab.");
             }
             for (auto& r : g_snap.party) {
                 DrawRow(c, r, y, r.id == m_selParty);
                 y += kRowH;
             }
-            int bh = BenchHeaderY();
-            Fill(c, kLeft - 3, bh - 4, kRight - kLeft + 6, 1, 0xFFB4C3D6);
-            // the same "taken/seats" form as the Party heading
-            std::wstring bench = L"Bench " + std::to_wstring(g_snap.bench.size()) + L"/"
-                + std::to_wstring(g_snap.benchSeats);
-            Text(c, m_pFontBold, kLeft, bh, bench);
-            int by = BenchTop();
+        } else {
+            Text(c, m_pFontBold, kLeft, kPartyTop, L"At camp");
+            int by = ListTop();
             int visible = BenchVisible();
             if (g_snap.bench.empty()) {
-                Text(c, m_pFontLight, kLeft + 4, by + 7, L"Nobody is on the Bench.");
+                Text(c, m_pFontLight, kLeft + 4, by + 7, L"Nobody is at camp.");
             }
             for (int i = 0; i < visible; ++i) {
                 size_t index = static_cast<size_t>(m_nBenchScroll + i);
                 if (index >= g_snap.bench.size()) break;
-                DrawRow(c, g_snap.bench[index], by + i * kRowH, g_snap.bench[index].id == m_selBench);
+                DrawCampRow(c, g_snap.bench[index], by + i * kCampRowH, g_snap.bench[index].id == m_selBench);
             }
-            if (m_nBenchScroll > 0) Text(c, m_pFontGrey, kRight - 8, bh, L"\x25B2");
+            if (m_nBenchScroll > 0) Arrow(c, kRight - 8, kPartyTop + 4, true);
             if (m_nBenchScroll + visible < static_cast<int>(g_snap.bench.size())) {
-                Text(c, m_pFontGrey, kRight - 8, ListBottom() - 14, L"\x25BC");
+                Arrow(c, kRight - 8, ListBottom() - 10, false);
             }
         }
         std::wstring status = StatusText();
@@ -996,15 +1143,6 @@ public:
         }
         for (int bt = BT_CALL; bt < BT_CLOSE; ++bt) {
             DrawButton(c, bt);
-        }
-        if (m_bDragging) {
-            const Row* r = FindRow(m_dragId);
-            if (r) {
-                int w = TextW(m_pFontBold, r->name) + 8;
-                Fill(c, m_nMouseX + 8, m_nMouseY + 4, w, 16, 0xFF7D90AA);
-                Fill(c, m_nMouseX + 9, m_nMouseY + 5, w - 2, 14, 0xFFFFFFE0);
-                Text(c, m_pFontBold, m_nMouseX + 12, m_nMouseY + 6, r->name);
-            }
         }
     }
 
@@ -1035,31 +1173,6 @@ public:
         sel = (sel == r->id) ? std::string() : r->id;
         m_lastPicked = sel.empty() ? std::string() : r->id;
         play_ui_sound(L"BtMouseClick");
-    }
-
-    void Drop(int x, int y) {
-        const Row* from = FindRow(m_dragId);
-        if (!from) return;
-        RowHit target = HitRow(x, y);
-        if (m_dragFromParty) {
-            if (target.row && !target.party && CanSwap(from, target.row)) {
-                SendAction(VERB_SWAP, from, target.row);
-            } else if (InBenchBlock(y) && (from->flags & ROW_BENCH)) {
-                SendAction(VERB_BENCH, from, nullptr);
-            } else {
-                return;
-            }
-        } else {
-            if (target.row && target.party && CanSwap(target.row, from)) {
-                SendAction(VERB_SWAP, target.row, from);
-            } else if (InPartyBlock(y) && (from->flags & ROW_CALL)) {
-                SendAction(VERB_CALL, from, nullptr);
-            } else {
-                return;
-            }
-        }
-        play_ui_sound(L"DragEnd");
-        Sent();
     }
 
     // A page takes the clicks: its options and buttons, and the title bar's close button.
@@ -1109,10 +1222,27 @@ public:
         m_nMouseX = rx;
         m_nMouseY = ry;
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK) g_bLastClickOurs = true; // Esc closes this window now
+        { // the tabs take their clicks over the lists and over a page alike
+            int tab = TabAt(rx, ry);
+            if ((msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK) && tab >= 0) {
+                m_nPressedTab = tab;
+                play_ui_sound(L"BtMouseClick");
+                InvalidateRect(nullptr);
+                return;
+            }
+            if (msg == WM_LBUTTONUP && m_nPressedTab >= 0) {
+                int pressed = m_nPressedTab;
+                m_nPressedTab = -1;
+                InvalidateRect(nullptr);
+                if (tab == pressed && (pressed != m_nTab || pressed == TAB_PLANS)) ShowTab(pressed);
+                return;
+            }
+        }
         if (g_page.valid) {
             PageMouseButton(msg, rx, ry);
             return;
         }
+        if (m_nTab == TAB_PLANS) return; // nothing to click while its page is on the way
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK) {
             if (InRetry(rx, ry)) {
                 m_bPressedRetry = true;
@@ -1144,8 +1274,6 @@ public:
                 m_dwLastClick = now;
                 m_dragId = hit.row->id;
                 m_dragFromParty = hit.party;
-                m_nDownX = rx;
-                m_nDownY = ry;
             }
             return;
         }
@@ -1156,18 +1284,12 @@ public:
                 InvalidateRect(nullptr);
                 return;
             }
-            if (m_bDragging) {
-                m_bDragging = false;
-                Drop(rx, ry);
-                m_dragId.clear();
-                InvalidateRect(nullptr);
-                return;
-            }
             if (!m_dragId.empty()) {
                 bool party = m_dragFromParty;
                 const Row* r = FindRow(m_dragId);
+                bool same = HitRow(rx, ry).row == r; // released on the row it went down on
                 m_dragId.clear();
-                Pick(r, party);
+                if (same) Pick(r, party);
                 InvalidateRect(nullptr);
                 return;
             }
@@ -1184,6 +1306,13 @@ public:
         if (this != ms_pInstance || m_bClosing) return 0;
         m_nMouseX = rx;
         m_nMouseY = ry;
+        {
+            int tab = TabAt(rx, ry);
+            if (tab != m_nHoverTab) {
+                m_nHoverTab = tab;
+                InvalidateRect(nullptr);
+            }
+        }
         if (g_page.valid) {
             POINT pt{rx, ry};
             RECT rcClose = ButtonRect(BT_CLOSE);
@@ -1198,17 +1327,13 @@ public:
             }
             return 0;
         }
-        if (!m_dragId.empty() && !m_bDragging && (abs(rx - m_nDownX) > 4 || abs(ry - m_nDownY) > 4)) {
-            m_bDragging = true;
-            play_ui_sound(L"DragStart");
-        }
         int any = ButtonAt(rx, ry);
         int bt = any;
         if (bt != BT_NONE && !Enabled(bt)) bt = BT_NONE;
         bool retry = InRetry(rx, ry);
         RowHit hit = HitRow(rx, ry);
         std::string hover = hit.row ? hit.row->id : std::string();
-        if (bt != m_nHoverBtn || any != m_nHoverAny || retry != m_bHoverRetry || hover != m_hoverRow || m_bDragging) {
+        if (bt != m_nHoverBtn || any != m_nHoverAny || retry != m_bHoverRetry || hover != m_hoverRow) {
             if ((bt != BT_NONE && bt != m_nHoverBtn) || (retry && !m_bHoverRetry)) play_ui_sound(L"BtMouseOver");
             m_nHoverBtn = bt;
             m_nHoverAny = any;
@@ -1228,7 +1353,7 @@ public:
             InvalidateRect(nullptr);
             return 1;
         }
-        if (InBenchBlock(ry)) {
+        if (m_nTab == TAB_CAMP) {
             m_nBenchScroll += nWheel > 0 ? -1 : 1;
             ClampScroll();
             InvalidateRect(nullptr);
@@ -1240,7 +1365,8 @@ public:
         CWnd::OnMouseEnter(bEnter);
         m_bMouseInside = bEnter != 0;
         if (!bEnter && (m_nHoverBtn != BT_NONE || m_nHoverAny != BT_NONE || m_bHoverRetry || !m_hoverRow.empty()
-                        || m_nHoverOption >= 0)) {
+                        || m_nHoverOption >= 0 || m_nHoverTab >= 0)) {
+            m_nHoverTab = -1;
             m_nHoverBtn = BT_NONE;
             m_nHoverAny = BT_NONE;
             m_bHoverRetry = false;
@@ -1264,6 +1390,8 @@ public:
                 WritePrivateProfileStringA("crew", "x", sx, kpaths::ConfigPath());
                 WritePrivateProfileStringA("crew", "y", sy, kpaths::ConfigPath());
             }
+            g_nSavedTab = m_nListTab;
+            WritePrivateProfileStringA("crew", "tab", m_nListTab == TAB_CAMP ? "camp" : "crew", kpaths::ConfigPath());
             g_bLastClickOurs = false;
             ms_pInstance = nullptr;
         }
@@ -1524,6 +1652,9 @@ void ReadSavedPosition(const std::string& config) {
     char sx[32] = {}, sy[32] = {};
     DWORD nx = GetPrivateProfileStringA("crew", "x", "", sx, sizeof(sx), config.c_str());
     DWORD ny = GetPrivateProfileStringA("crew", "y", "", sy, sizeof(sy), config.c_str());
+    char tab[16] = {};
+    GetPrivateProfileStringA("crew", "tab", "", tab, sizeof(tab), config.c_str());
+    g_nSavedTab = _stricmp(tab, "camp") == 0 ? TAB_CAMP : TAB_CREW;
     if (nx == 0 && ny == 0) return;
     char* ex = nullptr;
     char* ey = nullptr;
