@@ -477,9 +477,9 @@ public:
             return L"Pick someone to send to camp.";
         case BT_SWAP:
             if (p && b) return p->name + L" and " + b->name + L" can't swap right now.";
-            if (p) return L"Now pick who takes " + p->name + L"'s place, on the Camp tab.";
-            if (b) return L"Now pick who makes room for " + b->name + L", on the Crew tab.";
-            return L"Pick one on the Crew tab and one on the Camp tab.";
+            if (p) return L"Pick who takes " + p->name + L"'s place (Camp tab).";
+            if (b) return L"Pick who makes room for " + b->name + L" (Crew tab).";
+            return L"Pick one on Crew and one on Camp to swap.";
         case BT_CARD: return L"Pick someone to see their card.";
         case BT_USUAL: return L"No usual lineup to call right now.";
         case BT_FOLLOW: case BT_WAIT: case BT_GATHER: case BT_REBUFF: return L"Nobody is out with you.";
@@ -836,8 +836,8 @@ public:
             if (y < top || y + kLineH - 2 > bottom) continue;
             Text(c, InkFont(r.ink, r.bold), kLeft + r.x, y, r.text);
         }
-        if (m_nPageScroll > 0) Text(c, m_pFontGrey, kRight - 8, top - 14, L"\x25B2");
-        if (m_nPageScroll + PageVisibleH() < m_nPageH) Text(c, m_pFontGrey, kRight - 8, bottom - 2, L"\x25BC");
+        if (m_nPageScroll > 0) Arrow(c, kRight - 8, top - 10, true);
+        if (m_nPageScroll + PageVisibleH() < m_nPageH) Arrow(c, kRight - 8, bottom + 2, false);
         for (int pb : PageButtons()) {
             DrawPageButton(c, pb);
         }
@@ -955,6 +955,13 @@ public:
             return static_cast<int>(f->CalcTextWidth(Ztl_bstr_t(s.c_str()), Ztl_variant_t()));
         } catch (...) {
             return 0;
+        }
+    }
+    // "More above / below": a small triangle of rows (the game's fonts have no arrow glyphs: one drew as "?").
+    void Arrow(IWzCanvasPtr& c, int x, int y, bool up) {
+        for (int i = 0; i < 4; ++i) {
+            int row = up ? i : 3 - i;
+            Fill(c, x + 3 - row, y + i, 1 + row * 2, 1, 0xFF5A6B82);
         }
     }
     static void Fill(IWzCanvasPtr& c, int x, int y, int w, int h, unsigned int color) {
@@ -1124,9 +1131,9 @@ public:
                 if (index >= g_snap.bench.size()) break;
                 DrawCampRow(c, g_snap.bench[index], by + i * kCampRowH, g_snap.bench[index].id == m_selBench);
             }
-            if (m_nBenchScroll > 0) Text(c, m_pFontGrey, kRight - 8, kPartyTop, L"\x25B2");
+            if (m_nBenchScroll > 0) Arrow(c, kRight - 8, kPartyTop + 4, true);
             if (m_nBenchScroll + visible < static_cast<int>(g_snap.bench.size())) {
-                Text(c, m_pFontGrey, kRight - 8, ListBottom() - 14, L"\x25BC");
+                Arrow(c, kRight - 8, ListBottom() - 10, false);
             }
         }
         std::wstring status = StatusText();
