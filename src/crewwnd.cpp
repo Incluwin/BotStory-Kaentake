@@ -1105,7 +1105,8 @@ public:
             }
             int y = ListTop();
             if (g_snap.party.empty()) {
-                Text(c, m_pFontLight, kLeft + 4, y + 7, L"Nobody is out with you. Call someone from the Camp tab.");
+                Text(c, m_pFontLight, kLeft + 4, y + 7, L"Nobody is out with you.");
+                Text(c, m_pFontLight, kLeft + 4, y + 21, L"Call someone from the Camp tab.");
             }
             for (auto& r : g_snap.party) {
                 DrawRow(c, r, y, r.id == m_selParty);
