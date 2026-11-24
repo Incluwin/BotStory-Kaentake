@@ -25,6 +25,7 @@
 // ---------------------------------------------------------------------------
 #include "pch.h"
 #include "hook.h"
+#include "wvs/iteminfo.h"
 #include <windows.h>
 #include <cstring>
 
@@ -301,6 +302,38 @@ __declspec(naked) static void Restore_Array_Expanded_cave() {
 }
 
 
+// CUIStatusBar::OnMouseMove (0x008D7E..) draws an item tooltip for the slot under the mouse when the slot's
+// record holds an item (type 2 or 7). It asks CItemInfo for the item and uses the answer unchecked, so an
+// item this client has no data for (an id its Item.wz lacks, or 0) is a null read at 0x008D7FD3 and the
+// client is gone the moment the mouse crosses that slot. True for such a slot: the caller then shows no
+// tooltip. Slots the 26-slot bar does not own, and every other kind of record, are never reported.
+static bool g_bEnlargeQuickslotAttached = false;
+
+bool EnlargedQuickslotItemMissing(int nIdx) {
+    if (!g_bEnlargeQuickslotAttached || nIdx < 0 || nIdx >= 26) {
+        return false;
+    }
+    const unsigned char* pRecord = Array_Expanded + nIdx * 12;
+    if (pRecord[0] != 2 && pRecord[0] != 7) {
+        return false;
+    }
+    int nItemID = 0;
+    memcpy(&nItemID, pRecord + 1, sizeof(nItemID));
+    CItemInfo* pItemInfo = CItemInfo::GetInstance();
+    if (!pItemInfo) {
+        return false;
+    }
+    int nKind = nItemID / 1000000;
+    if (nKind == 1) {
+        return pItemInfo->GetEquipItem(nItemID) == nullptr;
+    }
+    if (nKind >= 2 && nKind <= 5) {
+        return pItemInfo->GetItemInfo(nItemID) == nullptr;
+    }
+    return true;    // the client's own lookup knows no other item range
+}
+
+
 // ============================================================================
 // Entry point -- called from hook.h::AttachClientHooks()
 // ============================================================================
@@ -417,4 +450,5 @@ void AttachEnlargeQuickslotMod() {
     CodeCave(0x0072B8E6, &DefaultQuickslotKeyMap_cave,            5);
     memcpy(Array_Expanded_Init, Array_Expanded, sizeof(Array_Expanded));
     CodeCave(0x008CFDFD, &Restore_Array_Expanded_cave,            6);
+    g_bEnlargeQuickslotAttached = true;
 }

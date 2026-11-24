@@ -531,7 +531,14 @@ int CTemporaryStatView::FindIcon_hook(const POINT& ptCursor, int& nType, int& nI
 int CUIStatusBar::GetShortCutIndexByPos_hook(int x, int y) {
     x = x + CWndMan::ms_pOrgStatusBar->x - CWndMan::ms_pOrgQuickSlot->x;
     y = y + CWndMan::ms_pOrgStatusBar->y - CWndMan::ms_pOrgQuickSlot->y;
-    return CUIStatusBar::GetShortCutIndexByPos(this, x, y);
+    int nIdx = CUIStatusBar::GetShortCutIndexByPos(this, x, y);
+    // Asked by CUIStatusBar::OnMouseMove (returns to 0x008D7F06) for the slot to draw a tooltip for: a slot
+    // holding an item this client has no data for would close the client there (see enlargequickslot.cpp),
+    // so it is reported as "no slot". Clicks and drops ask from elsewhere and still reach the slot.
+    if (reinterpret_cast<uintptr_t>(_ReturnAddress()) == 0x008D7F06 && EnlargedQuickslotItemMissing(nIdx)) {
+        return -1;
+    }
+    return nIdx;
 }
 
 
