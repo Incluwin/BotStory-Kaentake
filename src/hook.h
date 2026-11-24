@@ -65,6 +65,7 @@ void AttachBossHPMod();
 void AttachChronicleExtras();
 void AttachEnlargeQuickslotMod();
 bool EnlargedQuickslotItemMissing(int nIdx);   // enlargequickslot.cpp; used by resolution.cpp
+bool EnlargedQuickslotIndexOutOfRange(int nIdx);
 void AttachMovementKeysMod();
 void AttachShoulderSlotsFix();
 void AttachIsCorrectBodyPartFix();

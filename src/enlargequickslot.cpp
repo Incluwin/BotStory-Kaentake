@@ -374,6 +374,12 @@ static void __cdecl OpenQuickslotDialogForAllSlots() {
 // tooltip. Slots the 26-slot bar does not own, and every other kind of record, are never reported.
 static bool g_bEnlargeQuickslotAttached = false;
 
+// True for an index the 26-slot bar does not have. GetShortCutIndexByPos must never answer one (see the
+// loop bound in AttachEnlargeQuickslotMod); the hook in resolution.cpp checks all the same.
+bool EnlargedQuickslotIndexOutOfRange(int nIdx) {
+    return g_bEnlargeQuickslotAttached && nIdx >= 26;
+}
+
 bool EnlargedQuickslotItemMissing(int nIdx) {
     if (!g_bEnlargeQuickslotAttached || nIdx < 0 || nIdx >= 26) {
         return false;
@@ -470,7 +476,13 @@ void AttachEnlargeQuickslotMod() {
     // (Kaentake's ATTACH_HOOK at 0x008DE8D5 only overwrites the prologue.
     //  These body-level patches still apply.)
     Patch4(0x008DE8F4 + 1, reinterpret_cast<uintptr_t>(&Array_ptShortKeyPos) + 4);
-    Patch1(0x008DE926 + 1, 0x3E);
+    // The loop over the slot rectangles ends at "cmp esi, <end of s_ptShortKeyPos>" (81 FE imm32). The gist
+    // turned that into "cmp [esi], <the old end address>" (81 3E), which is true for nearly any value, so the
+    // loop ran on past slot 26 through whatever the linker put after the array and could answer a slot that
+    // does not exist. CUIStatusBar::OnMouseMove then read a record past Array_Expanded as a slot: with the
+    // mouse in the strip just above slots 1-2 that was index 39, "an item", and a null read at 0x008D7FD3
+    // (every crash report on Incluwin/BotStory#3). The compare keeps its form and gets the new array's end.
+    Patch4(0x008DE926 + 2, reinterpret_cast<uintptr_t>(&Array_ptShortKeyPos) + 4 + 26 * 8);
 
     // -------- CUIStatusBar::CQuickSlot::DrawSkillCooltime ------------------
     Patch1(0x008E099F + 3, 0x1A);                                 // cmp 8 -> cmp 26

@@ -532,6 +532,9 @@ int CUIStatusBar::GetShortCutIndexByPos_hook(int x, int y) {
     x = x + CWndMan::ms_pOrgStatusBar->x - CWndMan::ms_pOrgQuickSlot->x;
     y = y + CWndMan::ms_pOrgStatusBar->y - CWndMan::ms_pOrgQuickSlot->y;
     int nIdx = CUIStatusBar::GetShortCutIndexByPos(this, x, y);
+    if (EnlargedQuickslotIndexOutOfRange(nIdx)) {
+        return -1;      // not a slot of the 26-slot bar
+    }
     // Asked by CUIStatusBar::OnMouseMove (returns to 0x008D7F06) for the slot to draw a tooltip for: a slot
     // holding an item this client has no data for would close the client there (see enlargequickslot.cpp),
     // so it is reported as "no slot". Clicks and drops ask from elsewhere and still reach the slot.
