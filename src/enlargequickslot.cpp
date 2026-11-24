@@ -26,6 +26,7 @@
 #include "pch.h"
 #include "hook.h"
 #include "wvs/iteminfo.h"
+#include "wvs/packet.h"
 #include <windows.h>
 #include <cstring>
 
@@ -302,6 +303,70 @@ __declspec(naked) static void Restore_Array_Expanded_cave() {
 }
 
 
+// CQuickslotKeyMappedMan::OnInit reads the account's saved quickslot keys at login: 8 of them (0x20 bytes),
+// the stock bar's. A server that saves the 26-slot bar's keys sends all 26 (0x68 bytes); one that does not
+// sends 8. This stands in for the game's CInPacket::DecodeBuffer call there (0x0072B844) and reads whichever
+// arrived. With 8, slots 9 to 26 go back to the bar's defaults, so they never carry over from another account
+// logged in earlier in the same run.
+static void __fastcall DecodeQuickslotKeys(CInPacket* pPacket, void* /*edx*/, void* pKeys, unsigned int uSize) {
+    auto DecodeBuffer = reinterpret_cast<void(__thiscall*)(CInPacket*, void*, unsigned int)>(0x00432257);
+    const unsigned int uWide = 26 * 4;
+    if (pPacket->GetRemain() >= uWide) {
+        DecodeBuffer(pPacket, pKeys, uWide);
+        return;
+    }
+    DecodeBuffer(pPacket, pKeys, uSize);
+    memcpy(static_cast<unsigned char*>(pKeys) + uSize, Array_aDefaultQKM + uSize, uWide - uSize);
+}
+
+
+// "Change Quick Slots" in the key settings opens a dialog built for 8 slots: it copies 8 keys in from
+// CQuickslotKeyMappedMan (0x0072CC1C), lets the player click a slot and press a key, and on OK copies the 8
+// back (0x00836D13). Its own fields sit right behind those 8 keys, so it cannot be widened in place. Instead
+// the same dialog is shown once per group of 8 slots, working on g_aQuickslotPage: slots 1-8, 9-16, 17-24,
+// then 19-26 (the last group overlaps so that it holds real slots only). OK moves on to the next group,
+// Cancel stops. A group that was changed is copied back to its slots before the next one opens.
+static int g_aQuickslotPage[8];
+static bool g_bQuickslotDialogOk = false;
+static const int g_aQuickslotPageStart[] = {0, 8, 16, 18};
+
+static int __fastcall QuickslotDialogDoModal(void* pDialog, void* /*edx*/) {
+    int nRet = reinterpret_cast<int(__thiscall*)(void*)>(0x004EDBA1)(pDialog);
+    g_bQuickslotDialogOk = nRet == 1;
+    return nRet;
+}
+
+static void __cdecl OpenQuickslotDialogForAllSlots() {
+    auto OpenDialog = reinterpret_cast<void(__cdecl*)()>(0x00836C9B);
+    for (int nStart : g_aQuickslotPageStart) {
+        void* pMan = *reinterpret_cast<void**>(0x00BED658);
+        if (!pMan) {
+            return;
+        }
+        int* pKeys = reinterpret_cast<int*>(static_cast<unsigned char*>(pMan) + 4);
+        memcpy(g_aQuickslotPage, pKeys + nStart, sizeof(g_aQuickslotPage));
+        g_bQuickslotDialogOk = false;
+        OpenDialog();       // on OK it has copied the dialog's 8 keys into g_aQuickslotPage
+        if (!g_bQuickslotDialogOk) {
+            return;
+        }
+        pMan = *reinterpret_cast<void**>(0x00BED658);
+        if (!pMan) {
+            return;
+        }
+        pKeys = reinterpret_cast<int*>(static_cast<unsigned char*>(pMan) + 4);
+        if (memcmp(pKeys + nStart, g_aQuickslotPage, sizeof(g_aQuickslotPage)) != 0) {
+            memcpy(pKeys + nStart, g_aQuickslotPage, sizeof(g_aQuickslotPage));
+            // what the dialog's own OK does next: the status bar redraws its key caps
+            void* pStatusBar = *reinterpret_cast<void**>(0x00BEC208);
+            if (pStatusBar) {
+                reinterpret_cast<void(__thiscall*)(void*)>(0x008D82A7)(pStatusBar);
+            }
+        }
+    }
+}
+
+
 // CUIStatusBar::OnMouseMove (0x008D7E..) draws an item tooltip for the slot under the mouse when the slot's
 // record holds an item (type 2 or 7). It asks CItemInfo for the item and uses the answer unchecked, so an
 // item this client has no data for (an id its Item.wz lacks, or 0) is a null read at 0x008D7FD3 and the
@@ -450,5 +515,14 @@ void AttachEnlargeQuickslotMod() {
     CodeCave(0x0072B8E6, &DefaultQuickslotKeyMap_cave,            5);
     memcpy(Array_Expanded_Init, Array_Expanded, sizeof(Array_Expanded));
     CodeCave(0x008CFDFD, &Restore_Array_Expanded_cave,            6);
+    PatchCall(0x0072B844, &DecodeQuickslotKeys);                  // OnInit: 8 or 26 keys
+    // -------- Change Quick Slots dialog: every slot, 8 at a time ---------------
+    Patch1(0x0072CC1C, 0xB9);                                     // mov ecx, imm32 (was: mov ecx, [man])
+    Patch4(0x0072CC1C + 1, reinterpret_cast<uintptr_t>(g_aQuickslotPage) - 4);
+    Patch1(0x0072CC1C + 5, 0x90);
+    Patch1(0x00836D16, 0xB8);                                     // mov eax, imm32 (was: mov eax, [man])
+    Patch4(0x00836D16 + 1, reinterpret_cast<uintptr_t>(g_aQuickslotPage) - 4);
+    PatchCall(0x00836CFA, &QuickslotDialogDoModal);
+    PatchCall(0x0083360D, &OpenQuickslotDialogForAllSlots);
     g_bEnlargeQuickslotAttached = true;
 }
