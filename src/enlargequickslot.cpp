@@ -26,6 +26,7 @@
 #include "pch.h"
 #include "hook.h"
 #include "wvs/iteminfo.h"
+#include "wvs/packet.h"
 #include <windows.h>
 #include <cstring>
 
@@ -302,6 +303,23 @@ __declspec(naked) static void Restore_Array_Expanded_cave() {
 }
 
 
+// CQuickslotKeyMappedMan::OnInit reads the account's saved quickslot keys at login: 8 of them (0x20 bytes),
+// the stock bar's. A server that saves the 26-slot bar's keys sends all 26 (0x68 bytes); one that does not
+// sends 8. This stands in for the game's CInPacket::DecodeBuffer call there (0x0072B844) and reads whichever
+// arrived. With 8, slots 9 to 26 go back to the bar's defaults, so they never carry over from another account
+// logged in earlier in the same run.
+static void __fastcall DecodeQuickslotKeys(CInPacket* pPacket, void* /*edx*/, void* pKeys, unsigned int uSize) {
+    auto DecodeBuffer = reinterpret_cast<void(__thiscall*)(CInPacket*, void*, unsigned int)>(0x00432257);
+    const unsigned int uWide = 26 * 4;
+    if (pPacket->GetRemain() >= uWide) {
+        DecodeBuffer(pPacket, pKeys, uWide);
+        return;
+    }
+    DecodeBuffer(pPacket, pKeys, uSize);
+    memcpy(static_cast<unsigned char*>(pKeys) + uSize, Array_aDefaultQKM + uSize, uWide - uSize);
+}
+
+
 // CUIStatusBar::OnMouseMove (0x008D7E..) draws an item tooltip for the slot under the mouse when the slot's
 // record holds an item (type 2 or 7). It asks CItemInfo for the item and uses the answer unchecked, so an
 // item this client has no data for (an id its Item.wz lacks, or 0) is a null read at 0x008D7FD3 and the
@@ -450,5 +468,6 @@ void AttachEnlargeQuickslotMod() {
     CodeCave(0x0072B8E6, &DefaultQuickslotKeyMap_cave,            5);
     memcpy(Array_Expanded_Init, Array_Expanded, sizeof(Array_Expanded));
     CodeCave(0x008CFDFD, &Restore_Array_Expanded_cave,            6);
+    PatchCall(0x0072B844, &DecodeQuickslotKeys);                  // OnInit: 8 or 26 keys
     g_bEnlargeQuickslotAttached = true;
 }

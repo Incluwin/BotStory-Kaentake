@@ -11,6 +11,10 @@ protected:
     unsigned short m_uRawSeq;
     unsigned short m_uDataLen;
     size_t m_uOffset;
+
+public:
+    // Bytes of this packet not read yet (what CInPacket::DecodeBuffer checks a read against).
+    size_t GetRemain() const { return m_uLength > m_uOffset ? m_uLength - m_uOffset : 0; }
 };
 
 static_assert(sizeof(CInPacket) == 0x18);
